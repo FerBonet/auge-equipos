@@ -1975,7 +1975,7 @@
     //  más cercana de la formación (snap). Si suelta fuera del campo, va a SUB.
     //  Soporta mouse y touch.
     // ═══════════════════════════════════════════════════════════════════════════
-    function DraggableHockeyField({ formacion, convocados, rowOf, themeColor = "var(--plat)", onPosicionChange }) {
+    function DraggableHockeyField({ formacion, convocados, rowOf, themeColor = "var(--plat)", onPosicionChange, onClearAll }) {
       const positions = getFormationPositions(formacion);
       const W = 320, H = 520; // un poco más alto para que entren los suplentes abajo
       const pad = 18;
@@ -2135,11 +2135,30 @@
         return 0;
       });
 
+      // Hay al menos un titular?
+      const hayTitulares = convocados.some(j => rowOf(j.id)?.es_titular === true);
+
       return (
         <div>
-          <div style={{padding:"6px 10px", marginBottom:8, background:"rgba(45,157,111,0.08)", border:"1px solid rgba(45,157,111,0.25)", borderRadius:4, fontSize:11, color:"var(--white-soft)", display:"flex", alignItems:"center", gap:8}}>
-            <span style={{fontSize:14}}>🤚</span>
-            <span>Arrastrá las fichas dentro de la cancha para asignar posiciones · fuera del campo → suplente</span>
+          <div style={{display:"flex", gap:8, marginBottom:8, alignItems:"stretch"}}>
+            <div style={{flex:1, padding:"6px 10px", background:"rgba(45,157,111,0.08)", border:"1px solid rgba(45,157,111,0.25)", borderRadius:4, fontSize:11, color:"var(--white-soft)", display:"flex", alignItems:"center", gap:8}}>
+              <span style={{fontSize:14}}>🤚</span>
+              <span>Arrastrá las fichas a la cancha · fuera del campo → suplente</span>
+            </div>
+            {hayTitulares && onClearAll && (
+              <button onClick={() => {
+                if (confirm("¿Sacar todas las fichas de la cancha y mandarlas a suplentes?")) {
+                  onClearAll();
+                }
+              }} style={{
+                padding:"6px 12px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+                background:"rgba(232,85,85,0.08)", border:"1px solid rgba(232,85,85,0.3)",
+                color:"var(--red)", borderRadius:4, cursor:"pointer", flexShrink:0,
+                display:"flex", alignItems:"center", gap:5
+              }}>
+                🧹 LIMPIAR
+              </button>
+            )}
           </div>
           <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
             {/* Cancha (fondo) */}
@@ -6418,6 +6437,15 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               rowOf={rowOf}
               themeColor={club.theme_primary}
               onPosicionChange={setPosicion}
+              onClearAll={() => {
+                // Sacar a todos los titulares y mandarlos a suplente
+                convocados.forEach(j => {
+                  const r = rowOf(j.id);
+                  if (r?.es_titular === true) {
+                    onUpdate(j.id, { es_titular: false, field_pos: null });
+                  }
+                });
+              }}
             />
           </div>
 
