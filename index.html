@@ -2162,17 +2162,23 @@
           </div>
           <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
             {/* Cancha (fondo) */}
-            <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.15)" strokeWidth={1.5} rx={4}/>
+            <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
             {/* Línea de mediocampo */}
-            <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.10)" strokeWidth={1}/>
-            {/* Líneas de 23m */}
-            <line x1={pad} y1={pad + fh * 0.26} x2={pad + fw} y2={pad + fh * 0.26} stroke="rgba(255,255,255,0.06)" strokeWidth={0.8} strokeDasharray="4 4"/>
-            <line x1={pad} y1={pad + fh * 0.74} x2={pad + fw} y2={pad + fh * 0.74} stroke="rgba(255,255,255,0.06)" strokeWidth={0.8} strokeDasharray="4 4"/>
-            {/* Área */}
-            <rect x={pad + fw/2 - fw*0.25} y={pad + fh*0.88} width={fw*0.5} height={fh*0.12}
-              fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1} rx={2}/>
-            {/* Arco */}
-            <circle cx={pad + fw/2} cy={pad + fh*0.94} r={4} fill="none" stroke="rgba(255,255,255,0.2)"/>
+            <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
+            {/* Líneas de 23m (punteadas) */}
+            <line x1={pad} y1={pad + fh * 0.252} x2={pad + fw} y2={pad + fh * 0.252} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+            <line x1={pad} y1={pad + fh * 0.748} x2={pad + fw} y2={pad + fh * 0.748} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+            {/* Área propia (semicírculo abajo, la D de hockey) */}
+            <path d={`M ${pad + fw/2 - 0.30*fw} ${pad + fh} A ${0.30*fw} ${0.16*fh} 0 0 1 ${pad + fw/2 + 0.30*fw} ${pad + fh}`}
+              fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
+            {/* Área rival (semicírculo arriba) */}
+            <path d={`M ${pad + fw/2 - 0.30*fw} ${pad} A ${0.30*fw} ${0.16*fh} 0 0 0 ${pad + fw/2 + 0.30*fw} ${pad}`}
+              fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
+            {/* Arcos */}
+            <line x1={pad + fw/2 - 0.06*fw} y1={pad + fh} x2={pad + fw/2 + 0.06*fw} y2={pad + fh}
+              stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
+            <line x1={pad + fw/2 - 0.06*fw} y1={pad} x2={pad + fw/2 + 0.06*fw} y2={pad}
+              stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
 
             {/* Posiciones fantasma (círculos grises punteados) */}
             {Object.entries(positions).map(([key, p]) => {
@@ -2542,12 +2548,22 @@
               {posLabel}
             </text>
           )}
-          {/* Apellido abajo */}
+          {/* Apellido abajo - con sombra para que se lea bien sobre el campo */}
           {apellido && (
-            <text x={cx} y={cy + r + 10} textAnchor="middle" fontSize="9" fontFamily="sans-serif"
-              fill="white" fontWeight="600">
-              {apellido}
-            </text>
+            <>
+              {/* Sombra/halo negro */}
+              <text x={cx} y={cy + r + 12} textAnchor="middle"
+                fontSize="12" fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                fill="rgba(0,0,0,0.85)" fontWeight="700" stroke="rgba(0,0,0,0.85)" strokeWidth="2.5" paintOrder="stroke">
+                {apellido}
+              </text>
+              {/* Texto blanco encima */}
+              <text x={cx} y={cy + r + 12} textAnchor="middle"
+                fontSize="12" fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                fill="white" fontWeight="700">
+                {apellido}
+              </text>
+            </>
           )}
         </g>
       );
@@ -2557,9 +2573,9 @@
     function apellidoCorto(nombre) {
       if (!nombre) return "";
       // Si tiene coma, asume "Apellido, Nombre"
-      if (nombre.includes(",")) return nombre.split(",")[0].trim().slice(0, 10);
+      if (nombre.includes(",")) return nombre.split(",")[0].trim();
       // Sino, primera palabra
-      return nombre.trim().split(/\s+/)[0].slice(0, 10);
+      return nombre.trim().split(/\s+/)[0];
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2847,28 +2863,15 @@
               <>
                 <div ref={campoRef} style={{background:"var(--bg)", padding:14, borderRadius:6}}>
                   <ExportableHeader fecha={fecha} club={club} counts={counts}/>
-                  <div style={{padding:14, background:"#0a2418", borderRadius:6, marginTop:12}}>
-                    {/* Header tipo LineUp11: nombre + categoría + kit */}
-                    <div style={{textAlign:"center", marginBottom:10}}>
-                      <div style={{fontSize:22, fontWeight:900, color:"#FFFFFF", letterSpacing:-0.5, lineHeight:1}}>
-                        {club.nombre}
-                      </div>
-                      <div style={{fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:4}}>
-                        {club.categoria}
-                      </div>
-                      {(club.kit_titular || fecha.formacion) && (
-                        <div style={{fontSize:9, color:"rgba(255,255,255,0.45)", fontFamily:"var(--mono)", letterSpacing:1.5, marginTop:4}}>
-                          {fecha.formacion ? `${fecha.formacion}` : ""}
-                          {fecha.formacion && club.kit_titular ? " · " : ""}
-                          {club.kit_titular ? `CAMISETA ${club.kit_titular.toUpperCase()}` : ""}
-                        </div>
-                      )}
+                  <div style={{padding:14, background:"rgba(0,0,0,0.2)", borderRadius:6, marginTop:12}}>
+                    <div style={{fontSize:10, fontFamily:"var(--mono)", color:"var(--white-dim)", letterSpacing:2, textAlign:"center", marginBottom:10}}>
+                      FORMACIÓN · {fecha.formacion || "4-3-3"}
                     </div>
-                    <JerseyHockeyField
+                    <HockeyField
                       formacion={fecha.formacion || "4-3-3"}
                       titulares={titulares}
                       suplentes={suplentes}
-                      club={club}
+                      themeColor={club.theme_primary}
                     />
                   </div>
                 </div>
