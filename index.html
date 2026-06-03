@@ -83,47 +83,57 @@
     //  - short: versión corta para listados/tags (3-4 chars)
     // ═══════════════════════════════════════════════════════════════════════════
     const POSITION_GROUPS = [
-      { label: "🥅 Arquero", options: [
-        { value: "Arquero", label: "Arquero", short: "ARQ" },
-      ]},
-      { label: "🛡️ Defensores", options: [
-        { value: "Defensor central", label: "Defensor central", short: "DC" },
-        { value: "Defensor central derecho", label: "Defensor central derecho", short: "DCD" },
-        { value: "Defensor central izquierdo", label: "Defensor central izquierdo", short: "DCI" },
-        { value: "Defensor derecho", label: "Defensor derecho (lateral)", short: "LD" },
-        { value: "Defensor izquierdo", label: "Defensor izquierdo (lateral)", short: "LI" },
-      ]},
-      { label: "⚙️ Volantes", options: [
-        { value: "Volante central", label: "Volante central", short: "VC" },
-        { value: "Volante central derecho", label: "Volante central derecho", short: "VCD" },
-        { value: "Volante central izquierdo", label: "Volante central izquierdo", short: "VCI" },
-        { value: "Volante derecho", label: "Volante derecho", short: "VD" },
-        { value: "Volante izquierdo", label: "Volante izquierdo", short: "VI" },
-      ]},
-      { label: "⚔️ Delanteros", options: [
-        { value: "Delantero central", label: "Delantero central", short: "DEL-C" },
-        { value: "Delantero derecho", label: "Delantero derecho", short: "DEL-D" },
-        { value: "Delantero izquierdo", label: "Delantero izquierdo", short: "DEL-I" },
+      { label: "Líneas", options: [
+        { value: "ARQ", label: "🥅 ARQ · Arquero",   short: "ARQ" },
+        { value: "DEF", label: "🛡️ DEF · Defensora", short: "DEF" },
+        { value: "VOL", label: "⚙️ VOL · Volante",   short: "VOL" },
+        { value: "DEL", label: "⚔️ DEL · Delantera", short: "DEL" },
       ]},
     ];
 
     // Lookup helpers
     const ALL_POSITIONS = POSITION_GROUPS.flatMap(g => g.options);
+
+    // Map de valores VIEJOS (largos o cortos legacy) → cortos nuevos. Solo para mostrar bien
+    // los jugadores que se cargaron antes con el editor que tenía 14 opciones.
+    const LEGACY_POSITION_MAP = {
+      // Cortos clásicos
+      "GK": "ARQ", "DEF": "DEF", "MED": "VOL", "DEL": "DEL",
+      // Largos viejos
+      "Arco": "ARQ", "Arquero": "ARQ",
+      "Defensa": "DEF",
+      "Defensor central": "DEF", "Defensor central derecho": "DEF", "Defensor central izquierdo": "DEF",
+      "Defensor derecho": "DEF", "Defensor izquierdo": "DEF",
+      "Mediocampo": "VOL",
+      "Volante central": "VOL", "Volante central derecho": "VOL", "Volante central izquierdo": "VOL",
+      "Volante derecho": "VOL", "Volante izquierdo": "VOL",
+      "Delantero": "DEL",
+      "Delantero central": "DEL", "Delantero derecho": "DEL", "Delantero izquierdo": "DEL",
+    };
+
     function getPositionShort(value) {
       if (!value) return "";
-      const found = ALL_POSITIONS.find(p => p.value === value);
-      if (found) return found.short;
-      // Compatibilidad con valores viejos (GK/DEF/MED/DEL/Arco/Defensa/Mediocampo/Delantero)
-      const legacy = {
-        "GK": "ARQ", "DEF": "DEF", "MED": "MED", "DEL": "DEL",
-        "Arco": "ARQ", "Defensa": "DEF", "Mediocampo": "MED", "Delantero": "DEL",
-      };
-      return legacy[value] || value.slice(0, 4).toUpperCase();
+      return LEGACY_POSITION_MAP[value] || value.toUpperCase().slice(0, 4);
     }
     function getPositionLabel(value) {
       if (!value) return "—";
       const found = ALL_POSITIONS.find(p => p.value === value);
-      return found ? found.label : value;
+      if (found) return found.label;
+      // Si es un valor viejo (Defensor central, etc), mostrarlo tal cual
+      return value;
+    }
+    // Devuelve uno de "ARQ" | "DEF" | "VOL" | "DEL" | "" según el valor (corto nuevo o legacy)
+    function getPositionGroup(value) {
+      return getPositionShort(value); // ya devuelve uno de los 4 grupos
+    }
+    // Devuelve color del badge según la línea del jugador
+    function getPositionColor(value) {
+      const g = getPositionGroup(value);
+      if (g === "ARQ") return "var(--gold)";
+      if (g === "DEF") return "var(--plat)";
+      if (g === "VOL") return "var(--orange)";
+      if (g === "DEL") return "var(--red)";
+      return "var(--white-dim)";
     }
 
     const ESTADOS_JUGADOR = [
@@ -2225,13 +2235,13 @@
         };
       });
 
-      // Mapeo de posición amplia → grupo de filtro
+      // Mapeo de posición amplia → grupo de filtro (devuelve lowercase para los filtros existentes)
       const grupoDeJugador = (j) => {
-        const pos = (j.posicion || "").toLowerCase();
-        if (pos.includes("arquer")) return "gk";
-        if (pos.includes("defensor")) return "def";
-        if (pos.includes("volante")) return "med";
-        if (pos.includes("delantero")) return "del";
+        const g = getPositionGroup(j.posicion);
+        if (g === "ARQ") return "gk";
+        if (g === "DEF") return "def";
+        if (g === "VOL") return "med";
+        if (g === "DEL") return "del";
         return "otros";
       };
 
@@ -2696,15 +2706,8 @@
       const statusInfo = getStatusInfo(status);
       const posShort = getPositionShort(jugador.posicion);
 
-      // Mapeo de posición amplia a color del badge
-      const lineColor = (() => {
-        const pos = (jugador.posicion || "").toLowerCase();
-        if (pos.includes("arquer"))   return "var(--gold)";
-        if (pos.includes("defensor")) return "var(--plat)";
-        if (pos.includes("volante"))  return "var(--orange)";
-        if (pos.includes("delantero"))return "var(--red)";
-        return "var(--white-dim)";
-      })();
+      // Color del badge según la línea (usa helper global)
+      const lineColor = getPositionColor(jugador.posicion);
 
       return (
         <div style={{
@@ -5919,14 +5922,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // Si este jugador NO está convocado y ya hay 20 → deshabilitar el botón CONV
       const convDisabled = status !== "convocado" && convocadosCount >= MAX_CONVOCADOS;
 
-      const lineColor = (() => {
-        const pos = (jugador.posicion || "").toLowerCase();
-        if (pos.includes("arquer"))   return "var(--gold)";
-        if (pos.includes("defensor")) return "var(--plat)";
-        if (pos.includes("volante"))  return "var(--orange)";
-        if (pos.includes("delantero"))return "var(--red)";
-        return "var(--white-dim)";
-      })();
+      const lineColor = getPositionColor(jugador.posicion);
 
       const setStatus = (newStatus) => {
         // Si va a convocado y ya está en el límite, no permitir
