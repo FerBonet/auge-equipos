@@ -2146,6 +2146,8 @@
       const [filtroLinea, setFiltroLinea] = usePersistedState(`conv_pub_${fecha.id}_filtro`, "todos");
       const [expandedId, setExpandedId] = useState(null);
       const [exporting, setExporting] = useState(false);
+      const [openConvocados, setOpenConvocados] = usePersistedState(`conv_pub_${fecha.id}_openConv`, true);
+      const [openDudasBajas, setOpenDudasBajas] = usePersistedState(`conv_pub_${fecha.id}_openDB`, false);
       const listaRef = useRef(null);
       const campoRef = useRef(null);
 
@@ -2304,30 +2306,74 @@
               {/* ── Lista (envuelta con ref para exportar) ─── */}
               <div ref={listaRef} style={{background:"var(--bg)", padding:14, borderRadius:6}}>
                 <ExportableHeader fecha={fecha} club={club} counts={counts}/>
-                <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, overflow:"hidden", marginTop:12}}>
-                  {itemsFiltrados.length === 0 ? (
-                    <div style={{padding:18, textAlign:"center", fontSize:12, color:"var(--white-dim)"}}>
-                      No hay jugadores en esta línea.
+                {(() => {
+                  const itemsConv = itemsFiltrados.filter(it => it.status === "convocado");
+                  const itemsDB = itemsFiltrados.filter(it => it.status === "duda" || it.status === "baja");
+                  return (
+                    <div style={{marginTop:12, display:"flex", flexDirection:"column", gap:10}}>
+                      {/* Sección Convocados */}
+                      <CollapsibleSection
+                        title="CONVOCADOS"
+                        icon="✓"
+                        count={itemsConv.length}
+                        countColor="var(--green)"
+                        open={openConvocados}
+                        onToggle={() => setOpenConvocados(v => !v)}
+                      >
+                        {itemsConv.length === 0 ? (
+                          <div style={{padding:14, textAlign:"center", fontSize:11, color:"var(--white-dim)", fontStyle:"italic"}}>
+                            Sin convocados en esta línea.
+                          </div>
+                        ) : itemsConv.map((it, i) => (
+                          <ConvocatoriaRow
+                            key={it.jugador.id}
+                            item={it}
+                            isLast={i === itemsConv.length - 1}
+                            fecha={fecha}
+                            stats={seasonStats[it.jugador.id]}
+                            expanded={expandedId === it.jugador.id}
+                            onToggle={() => setExpandedId(expandedId === it.jugador.id ? null : it.jugador.id)}
+                          />
+                        ))}
+                      </CollapsibleSection>
+
+                      {/* Sección Dudas / Bajas */}
+                      <CollapsibleSection
+                        title="DUDAS / BAJAS"
+                        icon="?"
+                        count={itemsDB.length}
+                        countColor="var(--orange)"
+                        open={openDudasBajas}
+                        onToggle={() => setOpenDudasBajas(v => !v)}
+                      >
+                        {itemsDB.length === 0 ? (
+                          <div style={{padding:14, textAlign:"center", fontSize:11, color:"var(--white-dim)", fontStyle:"italic"}}>
+                            Sin dudas ni bajas en esta línea.
+                          </div>
+                        ) : itemsDB.map((it, i) => (
+                          <ConvocatoriaRow
+                            key={it.jugador.id}
+                            item={it}
+                            isLast={i === itemsDB.length - 1}
+                            fecha={fecha}
+                            stats={seasonStats[it.jugador.id]}
+                            expanded={expandedId === it.jugador.id}
+                            onToggle={() => setExpandedId(expandedId === it.jugador.id ? null : it.jugador.id)}
+                          />
+                        ))}
+                      </CollapsibleSection>
                     </div>
-                  ) : itemsFiltrados.map((it, i) => (
-                    <ConvocatoriaRow
-                      key={it.jugador.id}
-                      item={it}
-                      isLast={i === itemsFiltrados.length - 1}
-                      fecha={fecha}
-                      stats={seasonStats[it.jugador.id]}
-                      expanded={expandedId === it.jugador.id}
-                      onToggle={() => setExpandedId(expandedId === it.jugador.id ? null : it.jugador.id)}
-                    />
-                  ))}
-                </div>
+                  );
+                })()}
               </div>
 
               {/* Botón exportar */}
               <button onClick={async () => {
-                setExpandedId(null); // colapsar todos para que la imagen quede limpia
+                setExpandedId(null); // colapsar todos los detalles para que la imagen quede limpia
+                setOpenConvocados(true); // abrir ambas secciones para que se vea todo
+                setOpenDudasBajas(true);
                 setExporting(true);
-                await new Promise(r => setTimeout(r, 100)); // dejar repintar
+                await new Promise(r => setTimeout(r, 150)); // dejar repintar
                 const rivalSlug = safeFilename(fecha.rival || "rival");
                 await exportImage(listaRef.current, `convocatoria_F${fecha.fecha_num}_lista_${rivalSlug}`);
                 setExporting(false);
@@ -2453,6 +2499,47 @@
         <div style={{textAlign:"center", minWidth:24}}>
           <div style={{fontSize:16, fontWeight:900, color, fontFamily:"var(--mono)", lineHeight:1}}>{value}</div>
           <div style={{fontSize:8, color:"var(--white-dim)", fontFamily:"var(--mono)", letterSpacing:1, fontWeight:600, marginTop:2}}>{label}</div>
+        </div>
+      );
+    }
+
+    // ─── Sección colapsable con encabezado clickeable ───────────────────────
+    function CollapsibleSection({ title, icon, count, countColor, open, onToggle, children }) {
+      return (
+        <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, overflow:"hidden"}}>
+          <div onClick={onToggle} style={{
+            display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+            cursor:"pointer", userSelect:"none",
+            background: open ? "rgba(255,255,255,0.03)" : "transparent",
+            borderBottom: open ? "1px solid rgba(255,255,255,0.04)" : "none"
+          }}>
+            {/* Icono de la sección */}
+            <span style={{
+              width:22, height:22, borderRadius:11, background: `${countColor}26`,
+              color: countColor, fontSize:11, fontWeight:900, fontFamily:"var(--mono)",
+              textAlign:"center", lineHeight:"22px", flexShrink:0
+            }}>{icon}</span>
+
+            {/* Título */}
+            <div style={{flex:1, fontSize:11, letterSpacing:2, fontFamily:"var(--mono)", fontWeight:700, color:"var(--white-soft)"}}>
+              {title}
+            </div>
+
+            {/* Contador */}
+            <span style={{
+              padding:"2px 8px", fontSize:11, fontWeight:900, fontFamily:"var(--mono)",
+              color: countColor, background: `${countColor}1A`, borderRadius:3
+            }}>{count}</span>
+
+            {/* Chevron rotando */}
+            <span style={{
+              fontSize:10, color:"var(--white-dim)",
+              transform: open ? "rotate(90deg)" : "rotate(0deg)",
+              transition:"transform 0.2s ease",
+              flexShrink:0
+            }}>▶</span>
+          </div>
+          {open && <div>{children}</div>}
         </div>
       );
     }
@@ -3113,20 +3200,6 @@
                   </div>
                   {fechaActual && <FechaDetalle fecha={fechaActual} club={club} jugadores={jugadores} session={session}/>}
                 </>
-              )}
-              {jugadores.length > 0 && (
-                <div style={{marginTop:30}}>
-                  <div style={{fontSize:11, letterSpacing:2, color:"var(--white-soft)", fontFamily:"var(--mono)", marginBottom:8, fontWeight:700}}>PLANTEL ({jugadores.length})</div>
-                  <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, overflow:"hidden"}}>
-                    {jugadores.map((p, i) => (
-                      <div key={p.id} style={{display:"flex", alignItems:"center", padding:"10px 14px", borderBottom: i < jugadores.length-1 ? "1px solid rgba(255,255,255,0.04)" : "none"}}>
-                        <div style={{width:32, height:32, borderRadius:16, background:`${club.theme_primary}1F`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:900, color:club.theme_primary, marginRight:12}}>{p.numero || "?"}</div>
-                        <div style={{flex:1, fontSize:14, fontWeight:600}}>{p.nombre}</div>
-                        <div style={{fontSize:9, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", fontWeight:700}}>{p.posicion}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               )}
               <div style={{marginTop:50, paddingTop:24, borderTop:"1px solid rgba(255,255,255,0.05)", textAlign:"center", display:"flex", flexDirection:"column", gap:8, alignItems:"center"}}>
                 {isOwnerOrAdmin && (
