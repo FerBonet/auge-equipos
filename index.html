@@ -14155,6 +14155,176 @@
   }
   var MOTIVOS = ["", "Lesi\xF3n", "Viaje", "Decisi\xF3n t\xE9cnica", "Personal"];
   var ESTADOS = ["convocado", "duda", "baja"];
+  function CampoEditor({ players, formation, onAssign }) {
+    const fieldRef = import_react.default.useRef(null);
+    const [drag, setDrag] = import_react.default.useState(null);
+    const positions = getPositions(formation);
+    const posKeys = Object.keys(positions).filter((k) => k !== "SUB" && positions[k].x != null);
+    const convocados = players.filter((p) => p.status === "convocado");
+    const placed = convocados.filter((p) => p.fieldPos && p.fieldPos !== "SUB" && positions[p.fieldPos]);
+    const bench = convocados.filter((p) => !p.fieldPos || p.fieldPos === "SUB" || !positions[p.fieldPos]);
+    const nearestSlot = (xPct, yPct) => {
+      let best = null, bestDist = Infinity;
+      posKeys.forEach((k) => {
+        const dx = positions[k].x - xPct;
+        const dy = positions[k].y - yPct;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          best = k;
+        }
+      });
+      return best;
+    };
+    const handlePointerDown = (e, playerId) => {
+      e.preventDefault();
+      const rect = fieldRef.current.getBoundingClientRect();
+      setDrag({ id: playerId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    };
+    const handlePointerMove = (e) => {
+      if (!drag) return;
+      e.preventDefault();
+      const rect = fieldRef.current.getBoundingClientRect();
+      setDrag({ ...drag, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    };
+    const handlePointerUp = (e) => {
+      if (!drag) return;
+      const rect = fieldRef.current.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const inField = px >= 0 && px <= rect.width && py >= 0 && py <= rect.height;
+      if (inField) {
+        const xPct = px / rect.width * 100;
+        const yPct = py / rect.height * 100;
+        const slot = nearestSlot(xPct, yPct);
+        if (slot) {
+          const occupant = players.find((p) => p.id !== drag.id && p.fieldPos === slot && p.status === "convocado");
+          if (occupant) onAssign(occupant.id, "");
+          onAssign(drag.id, slot);
+        }
+      } else {
+        onAssign(drag.id, "");
+      }
+      setDrag(null);
+    };
+    const FIELD_W = 100;
+    const draggedPlayer = drag ? convocados.find((p) => p.id === drag.id) : null;
+    const chipColor = { GK: "#C8A200", DEF: "#1a3f7a", MED: "#2a6496", DEL: "#8B1A1A" };
+    return /* @__PURE__ */ import_react.default.createElement("div", { style: { userSelect: "none" } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 2, color: "rgba(245,249,255,0.4)", fontFamily: "monospace", marginBottom: 8, textAlign: "center" } }, "ARRASTR\xC1 LAS FICHAS A LA CANCHA \xB7 SE ACOMODAN SOLAS"), /* @__PURE__ */ import_react.default.createElement(
+      "div",
+      {
+        ref: fieldRef,
+        onPointerMove: handlePointerMove,
+        onPointerUp: handlePointerUp,
+        onPointerLeave: handlePointerUp,
+        style: {
+          position: "relative",
+          width: "100%",
+          paddingBottom: "118%",
+          background: "linear-gradient(#1e7a1e,#196019)",
+          border: "2px solid rgba(255,255,255,0.3)",
+          borderRadius: 6,
+          marginBottom: 16,
+          touchAction: "none",
+          overflow: "hidden"
+        }
+      },
+      /* @__PURE__ */ import_react.default.createElement("svg", { viewBox: "0 0 100 118", style: { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" } }, /* @__PURE__ */ import_react.default.createElement("line", { x1: "0", y1: "27", x2: "100", y2: "27", stroke: "rgba(255,255,255,0.25)", strokeWidth: "0.4" }), /* @__PURE__ */ import_react.default.createElement("line", { x1: "0", y1: "59", x2: "100", y2: "59", stroke: "rgba(255,255,255,0.4)", strokeWidth: "0.5" }), /* @__PURE__ */ import_react.default.createElement("line", { x1: "0", y1: "91", x2: "100", y2: "91", stroke: "rgba(255,255,255,0.25)", strokeWidth: "0.4" }), /* @__PURE__ */ import_react.default.createElement("path", { d: "M 25 118 A 30 30 0 0 1 75 118", fill: "none", stroke: "rgba(255,255,255,0.3)", strokeWidth: "0.5" })),
+      posKeys.map((k) => {
+        const occupied = placed.some((p) => p.fieldPos === k);
+        if (occupied) return null;
+        const pos = positions[k];
+        return /* @__PURE__ */ import_react.default.createElement("div", { key: "slot_" + k, style: {
+          position: "absolute",
+          left: pos.x + "%",
+          top: pos.y / 118 * 100 + "%",
+          transform: "translate(-50%,-50%)",
+          width: 42,
+          height: 42,
+          borderRadius: "50%",
+          border: "2px dashed rgba(255,255,255,0.35)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 9,
+          color: "rgba(255,255,255,0.5)",
+          fontFamily: "monospace",
+          fontWeight: 700,
+          pointerEvents: "none"
+        } }, k);
+      }),
+      placed.map((p) => {
+        if (drag && drag.id === p.id) return null;
+        const pos = positions[p.fieldPos];
+        return /* @__PURE__ */ import_react.default.createElement(
+          "div",
+          {
+            key: p.id,
+            onPointerDown: (e) => handlePointerDown(e, p.id),
+            style: {
+              position: "absolute",
+              left: pos.x + "%",
+              top: pos.y / 118 * 100 + "%",
+              transform: "translate(-50%,-50%)",
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              background: chipColor[p.position] || "#1a3f7a",
+              border: "2px solid #fff",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "grab",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
+              touchAction: "none"
+            }
+          },
+          /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1 } }, p.number === 0 ? "?" : p.number),
+          /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 6, color: "rgba(255,255,255,0.85)", fontFamily: "monospace", marginTop: 1 } }, p.fieldPos)
+        );
+      }),
+      drag && draggedPlayer && /* @__PURE__ */ import_react.default.createElement("div", { style: {
+        position: "absolute",
+        left: drag.x,
+        top: drag.y,
+        transform: "translate(-50%,-50%)",
+        width: 44,
+        height: 44,
+        borderRadius: "50%",
+        background: chipColor[draggedPlayer.position] || "#1a3f7a",
+        border: "2px solid " + CELESTE,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.6)",
+        pointerEvents: "none",
+        zIndex: 10
+      } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#fff" } }, draggedPlayer.number === 0 ? "?" : draggedPlayer.number))
+    ), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 2, color: "rgba(245,249,255,0.4)", fontFamily: "monospace", marginBottom: 8 } }, "CONVOCADOS SIN POSICI\xD3N (", bench.length, ")"), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, minHeight: 50, padding: 10, background: "rgba(255,255,255,0.02)", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: 6 } }, bench.length === 0 && /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 10, color: "rgba(245,249,255,0.25)", fontFamily: "monospace" } }, "Todos ubicados"), bench.map((p) => {
+      if (drag && drag.id === p.id) return null;
+      return /* @__PURE__ */ import_react.default.createElement(
+        "div",
+        {
+          key: p.id,
+          onPointerDown: (e) => handlePointerDown(e, p.id),
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 10px",
+            background: chipColor[p.position] || "#1a3f7a",
+            borderRadius: 20,
+            border: "1px solid rgba(255,255,255,0.2)",
+            cursor: "grab",
+            touchAction: "none"
+          }
+        },
+        /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "#fff" } }, p.number === 0 ? "?" : p.number),
+        /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 10, color: "#fff", fontFamily: "monospace" } }, p.name.split(",")[0])
+      );
+    })));
+  }
   function AdminPanel({ onClose }) {
     const [pwd, setPwd] = (0, import_react.useState)("");
     const [auth, setAuth] = (0, import_react.useState)(false);
@@ -14237,10 +14407,22 @@
       }
     ), errMsg && /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 10, color: "#ef4444", fontFamily: "monospace", letterSpacing: 2 } }, errMsg), /* @__PURE__ */ import_react.default.createElement("button", { onClick: login, style: { background: "rgba(79,195,232,0.15)", border: "1px solid rgba(79,195,232,0.4)", color: CELESTE, padding: "8px 24px", borderRadius: 4, cursor: "pointer", fontSize: 10, letterSpacing: 3, fontFamily: "monospace" } }, "INGRESAR"), /* @__PURE__ */ import_react.default.createElement("button", { onClick: onClose, style: { background: "transparent", border: "none", color: "rgba(245,249,255,0.3)", cursor: "pointer", fontSize: 10, fontFamily: "monospace", letterSpacing: 2, marginTop: 8 } }, "CANCELAR"));
     const fecha = FECHAS.find((f) => f.fechaNum === fechaSel);
-    return /* @__PURE__ */ import_react.default.createElement("div", null, /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", null, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: "#FFD700", fontFamily: "monospace" } }, "\u2699\uFE0F MODO ADMINISTRADOR"), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 11, color: "rgba(245,249,255,0.4)", fontFamily: "monospace", marginTop: 2 } }, "Los cambios se guardan en este dispositivo")), /* @__PURE__ */ import_react.default.createElement("button", { onClick: onClose, style: { background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(245,249,255,0.4)", padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontSize: 9, fontFamily: "monospace" } }, "\u2715 CERRAR")), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 8 } }, "SELECCIONAR FECHA"), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, proximas.map((f) => /* @__PURE__ */ import_react.default.createElement("button", { key: f.fechaNum, onClick: () => setFechaSel(f.fechaNum), style: { padding: "5px 12px", fontSize: 10, letterSpacing: 2, fontFamily: "monospace", border: fechaSel === f.fechaNum ? "1px solid #FFD700" : "1px solid rgba(255,255,255,0.1)", background: fechaSel === f.fechaNum ? "rgba(255,215,0,0.12)" : "transparent", color: fechaSel === f.fechaNum ? "#FFD700" : "rgba(245,249,255,0.4)", borderRadius: 3, cursor: "pointer" } }, "F", f.fechaNum)))), fechaSel && fecha && /* @__PURE__ */ import_react.default.createElement(import_react.default.Fragment, null, /* @__PURE__ */ import_react.default.createElement("div", { style: { background: "rgba(79,195,232,0.07)", border: "1px solid rgba(79,195,232,0.2)", borderRadius: 6, padding: "10px 14px", marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 2 } }, "FECHA ", fechaSel, " \xB7 ", fecha.condition.toUpperCase()), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 14, fontWeight: 700 } }, fecha.rival), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 11, color: "rgba(245,249,255,0.4)", marginTop: 2 } }, fecha.date, " \xB7 ", fecha.kick)), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 6 } }, "FORMACI\xD3N"), /* @__PURE__ */ import_react.default.createElement("select", { value: formation, onChange: (e) => setFormation(e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(79,195,232,0.3)", borderRadius: 3, padding: "6px 10px", color: WHITE, fontSize: 11, fontFamily: "monospace" } }, /* @__PURE__ */ import_react.default.createElement("option", { value: "" }, "-- Sin definir --"), ["4-3-3", "4-4-2", "3-3-4", "3-4-3", "4-2-4"].map((f) => /* @__PURE__ */ import_react.default.createElement("option", { key: f, value: f }, f)))), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 8 } }, "PLANTEL"), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 20 } }, players.map((p) => /* @__PURE__ */ import_react.default.createElement("div", { key: p.id, style: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4, padding: "8px 12px" } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "grid", gridTemplateColumns: "28px 1fr auto", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { padding: "2px 4px", borderRadius: 2, background: posColors2[p.position], color: "#fff", fontSize: 8, fontFamily: "monospace", fontWeight: 700, textAlign: "center" } }, p.position), /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 13, color: WHITE } }, p.name), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", gap: 4 } }, ESTADOS.map((s) => /* @__PURE__ */ import_react.default.createElement("button", { key: s, onClick: () => updatePlayer(p.id, "status", s), style: { padding: "3px 8px", fontSize: 8, letterSpacing: 1, fontFamily: "monospace", border: p.status === s ? "1px solid " + statusColors[s] : "1px solid rgba(255,255,255,0.1)", background: p.status === s ? statusColors[s] + "22" : "transparent", color: p.status === s ? statusColors[s] : "rgba(245,249,255,0.3)", borderRadius: 2, cursor: "pointer" } }, s === "convocado" ? "CONV" : s === "duda" ? "DUDA" : "BAJA")))), (p.status === "duda" || p.status === "baja") && /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 6, display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 8, color: "rgba(245,249,255,0.35)", fontFamily: "monospace", letterSpacing: 1 } }, "MOTIVO:"), /* @__PURE__ */ import_react.default.createElement("select", { value: p.motivo || "", onChange: (e) => updatePlayer(p.id, "motivo", e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 3, padding: "3px 8px", color: WHITE, fontSize: 10, fontFamily: "monospace", flex: 1 } }, MOTIVOS.map((m) => /* @__PURE__ */ import_react.default.createElement("option", { key: m, value: m }, m || "-- Sin especificar --")))), p.status === "convocado" && /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 6, display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 8, color: "rgba(245,249,255,0.35)", fontFamily: "monospace", letterSpacing: 1 } }, "POSICI\xD3N:"), /* @__PURE__ */ import_react.default.createElement("select", { value: p.fieldPos || "", onChange: (e) => updatePlayer(p.id, "fieldPos", e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(79,195,232,0.25)", borderRadius: 3, padding: "3px 8px", color: WHITE, fontSize: 10, fontFamily: "monospace", flex: 1 } }, /* @__PURE__ */ import_react.default.createElement("option", { value: "" }, "-- Sin asignar --"), getPosOptions(formation).map((o) => {
+    return /* @__PURE__ */ import_react.default.createElement("div", null, /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", null, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: "#FFD700", fontFamily: "monospace" } }, "\u2699\uFE0F MODO ADMINISTRADOR"), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 11, color: "rgba(245,249,255,0.4)", fontFamily: "monospace", marginTop: 2 } }, "Los cambios se guardan en este dispositivo")), /* @__PURE__ */ import_react.default.createElement("button", { onClick: onClose, style: { background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(245,249,255,0.4)", padding: "4px 10px", borderRadius: 3, cursor: "pointer", fontSize: 9, fontFamily: "monospace" } }, "\u2715 CERRAR")), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 8 } }, "SELECCIONAR FECHA"), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", gap: 5, flexWrap: "wrap" } }, proximas.map((f) => /* @__PURE__ */ import_react.default.createElement("button", { key: f.fechaNum, onClick: () => setFechaSel(f.fechaNum), style: { padding: "5px 12px", fontSize: 10, letterSpacing: 2, fontFamily: "monospace", border: fechaSel === f.fechaNum ? "1px solid #FFD700" : "1px solid rgba(255,255,255,0.1)", background: fechaSel === f.fechaNum ? "rgba(255,215,0,0.12)" : "transparent", color: fechaSel === f.fechaNum ? "#FFD700" : "rgba(245,249,255,0.4)", borderRadius: 3, cursor: "pointer" } }, "F", f.fechaNum)))), fechaSel && fecha && /* @__PURE__ */ import_react.default.createElement(import_react.default.Fragment, null, /* @__PURE__ */ import_react.default.createElement("div", { style: { background: "rgba(79,195,232,0.07)", border: "1px solid rgba(79,195,232,0.2)", borderRadius: 6, padding: "10px 14px", marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 2 } }, "FECHA ", fechaSel, " \xB7 ", fecha.condition.toUpperCase()), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 14, fontWeight: 700 } }, fecha.rival), /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 11, color: "rgba(245,249,255,0.4)", marginTop: 2 } }, fecha.date, " \xB7 ", fecha.kick)), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginBottom: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 6 } }, "FORMACI\xD3N"), /* @__PURE__ */ import_react.default.createElement("select", { value: formation, onChange: (e) => setFormation(e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(79,195,232,0.3)", borderRadius: 3, padding: "6px 10px", color: WHITE, fontSize: 11, fontFamily: "monospace" } }, /* @__PURE__ */ import_react.default.createElement("option", { value: "" }, "-- Sin definir --"), ["4-3-3", "4-4-2", "3-3-4", "3-4-3", "4-2-4"].map((f) => /* @__PURE__ */ import_react.default.createElement("option", { key: f, value: f }, f)))), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14 } }, [["lista", "\u{1F4CB} LISTA"], ["campo", "\u{1F3D1} ARMAR CAMPO"]].map(([k, label]) => /* @__PURE__ */ import_react.default.createElement("button", { key: k, onClick: () => setAdminTab(k), style: {
+      flex: 1,
+      padding: "8px",
+      fontSize: 9,
+      letterSpacing: 2,
+      fontFamily: "monospace",
+      border: adminTab === k ? "1px solid " + CELESTE : "1px solid rgba(255,255,255,0.1)",
+      background: adminTab === k ? "rgba(79,195,232,0.15)" : "transparent",
+      color: adminTab === k ? CELESTE : "rgba(245,249,255,0.4)",
+      borderRadius: 4,
+      cursor: "pointer",
+      fontWeight: adminTab === k ? 700 : 400
+    } }, label))), adminTab === "campo" && (formation ? /* @__PURE__ */ import_react.default.createElement("div", { style: { marginBottom: 20 } }, /* @__PURE__ */ import_react.default.createElement(CampoEditor, { players, formation, onAssign: (id, pos) => updatePlayer(id, "fieldPos", pos) })) : /* @__PURE__ */ import_react.default.createElement("div", { style: { padding: "20px", textAlign: "center", fontSize: 10, color: "rgba(245,249,255,0.4)", fontFamily: "monospace", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: 6, marginBottom: 20 } }, "Eleg\xED una formaci\xF3n primero para armar el campo")), adminTab === "lista" && /* @__PURE__ */ import_react.default.createElement(import_react.default.Fragment, null, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 8, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 8 } }, "PLANTEL"), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, marginBottom: 20 } }, players.map((p) => /* @__PURE__ */ import_react.default.createElement("div", { key: p.id, style: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4, padding: "8px 12px" } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "grid", gridTemplateColumns: "28px 1fr auto", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { padding: "2px 4px", borderRadius: 2, background: posColors2[p.position], color: "#fff", fontSize: 8, fontFamily: "monospace", fontWeight: 700, textAlign: "center" } }, p.position), /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 13, color: WHITE } }, p.name), /* @__PURE__ */ import_react.default.createElement("div", { style: { display: "flex", gap: 4 } }, ESTADOS.map((s) => /* @__PURE__ */ import_react.default.createElement("button", { key: s, onClick: () => updatePlayer(p.id, "status", s), style: { padding: "3px 8px", fontSize: 8, letterSpacing: 1, fontFamily: "monospace", border: p.status === s ? "1px solid " + statusColors[s] : "1px solid rgba(255,255,255,0.1)", background: p.status === s ? statusColors[s] + "22" : "transparent", color: p.status === s ? statusColors[s] : "rgba(245,249,255,0.3)", borderRadius: 2, cursor: "pointer" } }, s === "convocado" ? "CONV" : s === "duda" ? "DUDA" : "BAJA")))), (p.status === "duda" || p.status === "baja") && /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 6, display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 8, color: "rgba(245,249,255,0.35)", fontFamily: "monospace", letterSpacing: 1 } }, "MOTIVO:"), /* @__PURE__ */ import_react.default.createElement("select", { value: p.motivo || "", onChange: (e) => updatePlayer(p.id, "motivo", e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 3, padding: "3px 8px", color: WHITE, fontSize: 10, fontFamily: "monospace", flex: 1 } }, MOTIVOS.map((m) => /* @__PURE__ */ import_react.default.createElement("option", { key: m, value: m }, m || "-- Sin especificar --")))), p.status === "convocado" && /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 6, display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ import_react.default.createElement("span", { style: { fontSize: 8, color: "rgba(245,249,255,0.35)", fontFamily: "monospace", letterSpacing: 1 } }, "POSICI\xD3N:"), /* @__PURE__ */ import_react.default.createElement("select", { value: p.fieldPos || "", onChange: (e) => updatePlayer(p.id, "fieldPos", e.target.value), style: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(79,195,232,0.25)", borderRadius: 3, padding: "3px 8px", color: WHITE, fontSize: 10, fontFamily: "monospace", flex: 1 } }, /* @__PURE__ */ import_react.default.createElement("option", { value: "" }, "-- Sin asignar --"), getPosOptions(formation).map((o) => {
       const takenBy = players.find((other) => other.id !== p.id && other.fieldPos === o.value && other.status === "convocado");
       return /* @__PURE__ */ import_react.default.createElement("option", { key: o.value, value: o.value, disabled: !!takenBy }, takenBy ? `\u2717 ${o.value} \xB7 ${o.label} (${takenBy.name.split(",")[0]})` : `${o.value} \xB7 ${o.label}`);
-    })))))), /* @__PURE__ */ import_react.default.createElement("button", { onClick: save, disabled: saving, style: { width: "100%", padding: "12px", background: saved ? "rgba(34,197,94,0.2)" : saving ? "rgba(255,255,255,0.05)" : "rgba(79,195,232,0.15)", border: saved ? "1px solid #22c55e" : saving ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(79,195,232,0.4)", color: saved ? "#22c55e" : saving ? "rgba(245,249,255,0.4)" : CELESTE, borderRadius: 4, cursor: saving ? "default" : "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: 700 } }, saved ? "\u2713 GUARDADO EN LA NUBE" : saving ? "\u23F3 GUARDANDO..." : "\u{1F4BE} GUARDAR CONVOCATORIA"), saved && /* @__PURE__ */ import_react.default.createElement("button", { onClick: onClose, style: { width: "100%", padding: "10px", marginTop: 8, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "#22c55e", borderRadius: 4, cursor: "pointer", fontSize: 10, letterSpacing: 3, fontFamily: "monospace" } }, "\u2192 VER CONVOCATORIA"), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 8, fontSize: 8, color: "rgba(245,249,255,0.2)", fontFamily: "monospace", textAlign: "center", letterSpacing: 1 } }, "Los cambios se aplican inmediatamente y persisten en este dispositivo"), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 24, borderTop: "1px solid rgba(79,195,232,0.15)", paddingTop: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 12 } }, "\u{1F4CB} CARGAR RESULTADO"), /* @__PURE__ */ import_react.default.createElement(ResultadoForm, { fechaNum: fechaSel, onSaved: () => alert("Resultado guardado!") }))));
+    }))))))), /* @__PURE__ */ import_react.default.createElement("button", { onClick: save, disabled: saving, style: { width: "100%", padding: "12px", background: saved ? "rgba(34,197,94,0.2)" : saving ? "rgba(255,255,255,0.05)" : "rgba(79,195,232,0.15)", border: saved ? "1px solid #22c55e" : saving ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(79,195,232,0.4)", color: saved ? "#22c55e" : saving ? "rgba(245,249,255,0.4)" : CELESTE, borderRadius: 4, cursor: saving ? "default" : "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: 700 } }, saved ? "\u2713 GUARDADO EN LA NUBE" : saving ? "\u23F3 GUARDANDO..." : "\u{1F4BE} GUARDAR CONVOCATORIA"), saved && /* @__PURE__ */ import_react.default.createElement("button", { onClick: onClose, style: { width: "100%", padding: "10px", marginTop: 8, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "#22c55e", borderRadius: 4, cursor: "pointer", fontSize: 10, letterSpacing: 3, fontFamily: "monospace" } }, "\u2192 VER CONVOCATORIA"), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 8, fontSize: 8, color: "rgba(245,249,255,0.2)", fontFamily: "monospace", textAlign: "center", letterSpacing: 1 } }, "Los cambios se aplican inmediatamente y persisten en este dispositivo"), /* @__PURE__ */ import_react.default.createElement("div", { style: { marginTop: 24, borderTop: "1px solid rgba(79,195,232,0.15)", paddingTop: 16 } }, /* @__PURE__ */ import_react.default.createElement("div", { style: { fontSize: 9, letterSpacing: 3, color: CELESTE, fontFamily: "monospace", marginBottom: 12 } }, "\u{1F4CB} CARGAR RESULTADO"), /* @__PURE__ */ import_react.default.createElement(ResultadoForm, { fechaNum: fechaSel, onSaved: () => alert("Resultado guardado!") }))));
   }
   function ResultadoForm({ fechaNum, onSaved }) {
     const fecha = FECHAS.find((f) => f.fechaNum === fechaNum);
