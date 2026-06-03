@@ -2204,6 +2204,194 @@
       );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  JERSEY HOCKEY FIELD · vista pública estilo LineUp11
+    //  Reemplaza los círculos por camisetas SVG. Solo para mostrar (no editable).
+    // ═══════════════════════════════════════════════════════════════════════════
+    function JerseyHockeyField({ formacion, titulares, suplentes, club }) {
+      const positions = getFormationPositions(formacion);
+      const W = 320, H = 580;
+      const pad = 14;
+      const fw = W - pad * 2;
+      const fh = 440; // alto de la cancha (resto es zona suplentes)
+      const SUB_ZONE_Y = fh + pad + 30; // dejo un margen para la línea divisoria
+
+      const titularColor = club.theme_primary || "#4FC3E8";
+      const detailColor = club.theme_secondary || "#FFD700";
+      const arqueroColor = "#34C759"; // verde, como en LineUp11
+
+      // Mapa de posiciones asignadas
+      const posMap = {};
+      for (const t of titulares) {
+        if (t.field_pos && positions[t.field_pos]) {
+          posMap[t.field_pos] = t;
+        }
+      }
+
+      // Helper para dibujar una camiseta SVG (path) en (cx, cy)
+      // cx, cy = centro del pecho de la camiseta
+      // color = color principal del cuerpo
+      // accent = color del cuello / detalles
+      const Jersey = ({ cx, cy, color, accent, scale = 1 }) => {
+        const w = 32 * scale;
+        const h = 32 * scale;
+        // Path: simplificación de una remera con mangas + cuerpo
+        // Origen de coords: centro horizontal en cx, top de la remera en cy - h*0.4
+        const x = cx - w / 2;
+        const y = cy - h * 0.45;
+        // path de la camiseta: mangas exteriores + cuerpo
+        const d = `
+          M ${x + w * 0.18} ${y}
+          L ${x} ${y + h * 0.15}
+          L ${x + w * 0.05} ${y + h * 0.42}
+          L ${x + w * 0.22} ${y + h * 0.36}
+          L ${x + w * 0.22} ${y + h * 0.95}
+          Q ${x + w * 0.22} ${y + h * 1.0} ${x + w * 0.28} ${y + h * 1.0}
+          L ${x + w * 0.72} ${y + h * 1.0}
+          Q ${x + w * 0.78} ${y + h * 1.0} ${x + w * 0.78} ${y + h * 0.95}
+          L ${x + w * 0.78} ${y + h * 0.36}
+          L ${x + w * 0.95} ${y + h * 0.42}
+          L ${x + w} ${y + h * 0.15}
+          L ${x + w * 0.82} ${y}
+          L ${x + w * 0.62} ${y}
+          Q ${x + w * 0.5} ${y + h * 0.10} ${x + w * 0.38} ${y}
+          Z
+        `;
+        // pequeño detalle de cuello tipo "V"
+        const dCollar = `
+          M ${x + w * 0.38} ${y}
+          Q ${x + w * 0.5} ${y + h * 0.13} ${x + w * 0.62} ${y}
+        `;
+        return (
+          <g>
+            <path d={d} fill={color} stroke="rgba(0,0,0,0.25)" strokeWidth={0.8}/>
+            <path d={dCollar} fill="none" stroke={accent} strokeWidth={1.2}/>
+          </g>
+        );
+      };
+
+      // Ubicación en SVG de cada posición
+      const titularXY = (fp) => {
+        const p = positions[fp];
+        if (!p) return null;
+        return {
+          x: pad + (p.x / 100) * fw,
+          y: pad + (p.y / 100) * fh,
+        };
+      };
+
+      // Suplentes acomodados en grilla
+      const subPositionOf = (idx, total) => {
+        const colCount = Math.max(4, Math.ceil(total / 2));
+        const col = idx % colCount;
+        const row = Math.floor(idx / colCount);
+        const cellW = fw / colCount;
+        return {
+          x: pad + col * cellW + cellW / 2,
+          y: SUB_ZONE_Y + 24 + row * 56,
+        };
+      };
+
+      // Apellido visible (completo, primer apellido si es "Apellido, Nombre")
+      const apellidoDe = (jugador) => {
+        const n = (jugador.nombre || "").trim();
+        if (n.includes(",")) return n.split(",")[0].trim();
+        return n.split(/\s+/)[0] || "—";
+      };
+
+      return (
+        <div style={{width:"100%", margin:"0 auto"}}>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto"}}>
+            {/* Gradiente del campo (verde oscuro arriba, más claro abajo) */}
+            <defs>
+              <linearGradient id="fieldGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#1a4d3a"/>
+                <stop offset="100%" stopColor="#2d6b50"/>
+              </linearGradient>
+            </defs>
+
+            {/* Cancha */}
+            <rect x={pad} y={pad} width={fw} height={fh}
+              fill="url(#fieldGradient)" stroke="rgba(255,255,255,0.18)" strokeWidth={1.5} rx={4}/>
+
+            {/* Líneas de mediocampo, 23m, área */}
+            <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2}
+              stroke="rgba(255,255,255,0.20)" strokeWidth={1}/>
+            <line x1={pad} y1={pad + fh * 0.26} x2={pad + fw} y2={pad + fh * 0.26}
+              stroke="rgba(255,255,255,0.10)" strokeWidth={0.8} strokeDasharray="4 4"/>
+            <line x1={pad} y1={pad + fh * 0.74} x2={pad + fw} y2={pad + fh * 0.74}
+              stroke="rgba(255,255,255,0.10)" strokeWidth={0.8} strokeDasharray="4 4"/>
+
+            {/* Círculo central */}
+            <circle cx={pad + fw/2} cy={pad + fh/2} r={fw*0.13}
+              fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
+
+            {/* Área grande inferior (D del shooting circle) */}
+            <path d={`M ${pad + fw/2 - fw*0.30} ${pad + fh*0.99} Q ${pad + fw/2} ${pad + fh*0.78} ${pad + fw/2 + fw*0.30} ${pad + fh*0.99}`}
+              fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
+
+            {/* Arco */}
+            <rect x={pad + fw/2 - fw*0.08} y={pad - 2} width={fw*0.16} height={6}
+              fill="rgba(255,255,255,0.85)" stroke="rgba(0,0,0,0.3)" strokeWidth={0.5}/>
+
+            {/* TITULARES */}
+            {Object.entries(positions).map(([key, p]) => {
+              const t = posMap[key];
+              const xy = titularXY(key);
+              if (!xy) return null;
+              if (!t) {
+                // Fantasma (sin asignar)
+                return (
+                  <g key={key}>
+                    <circle cx={xy.x} cy={xy.y} r={14}
+                      fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="2 3"/>
+                    <text x={xy.x} y={xy.y + 3} textAnchor="middle"
+                      fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.30)" fontFamily="var(--mono)">
+                      {key}
+                    </text>
+                  </g>
+                );
+              }
+              const isGK = key === "GK";
+              return (
+                <g key={key}>
+                  <Jersey cx={xy.x} cy={xy.y} color={isGK ? arqueroColor : titularColor} accent={detailColor}/>
+                  <text x={xy.x} y={xy.y + 28} textAnchor="middle"
+                    fontSize={11} fontWeight={700} fill="#FFFFFF"
+                    style={{textShadow:"0 1px 3px rgba(0,0,0,0.7)"}}>
+                    {apellidoDe(t.jugador)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Línea divisoria suplentes */}
+            <line x1={0} y1={SUB_ZONE_Y - 4} x2={W} y2={SUB_ZONE_Y - 4}
+              stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="3 3"/>
+            <text x={W/2} y={SUB_ZONE_Y + 8} textAnchor="middle"
+              fontSize={9} fontWeight={700} fill="rgba(255,255,255,0.5)" fontFamily="var(--mono)" letterSpacing={2.5}>
+              SUPLENTES
+            </text>
+
+            {/* SUPLENTES */}
+            {suplentes.map((s, i) => {
+              const xy = subPositionOf(i, suplentes.length);
+              return (
+                <g key={s.jugador_id}>
+                  <Jersey cx={xy.x} cy={xy.y} color={titularColor} accent={detailColor} scale={0.78}/>
+                  <text x={xy.x} y={xy.y + 23} textAnchor="middle"
+                    fontSize={9} fontWeight={700} fill="rgba(255,255,255,0.85)"
+                    style={{textShadow:"0 1px 2px rgba(0,0,0,0.7)"}}>
+                    {apellidoDe(s.jugador)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      );
+    }
+
     function HockeyField({ formacion, titulares, suplentes, themeColor = "var(--plat)", onTitularClick, onSuplenteClick, emptySlotsCount = 5 }) {
       const positions = getFormationPositions(formacion);
       const W = 320, H = 480;
@@ -2659,15 +2847,28 @@
               <>
                 <div ref={campoRef} style={{background:"var(--bg)", padding:14, borderRadius:6}}>
                   <ExportableHeader fecha={fecha} club={club} counts={counts}/>
-                  <div style={{padding:14, background:"rgba(0,0,0,0.2)", borderRadius:6, marginTop:12}}>
-                    <div style={{fontSize:10, fontFamily:"var(--mono)", color:"var(--white-dim)", letterSpacing:2, textAlign:"center", marginBottom:10}}>
-                      FORMACIÓN · {fecha.formacion || "4-3-3"}
+                  <div style={{padding:14, background:"#0a2418", borderRadius:6, marginTop:12}}>
+                    {/* Header tipo LineUp11: nombre + categoría + kit */}
+                    <div style={{textAlign:"center", marginBottom:10}}>
+                      <div style={{fontSize:22, fontWeight:900, color:"#FFFFFF", letterSpacing:-0.5, lineHeight:1}}>
+                        {club.nombre}
+                      </div>
+                      <div style={{fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:4}}>
+                        {club.categoria}
+                      </div>
+                      {(club.kit_titular || fecha.formacion) && (
+                        <div style={{fontSize:9, color:"rgba(255,255,255,0.45)", fontFamily:"var(--mono)", letterSpacing:1.5, marginTop:4}}>
+                          {fecha.formacion ? `${fecha.formacion}` : ""}
+                          {fecha.formacion && club.kit_titular ? " · " : ""}
+                          {club.kit_titular ? `CAMISETA ${club.kit_titular.toUpperCase()}` : ""}
+                        </div>
+                      )}
                     </div>
-                    <HockeyField
+                    <JerseyHockeyField
                       formacion={fecha.formacion || "4-3-3"}
                       titulares={titulares}
                       suplentes={suplentes}
-                      themeColor={club.theme_primary}
+                      club={club}
                     />
                   </div>
                 </div>
