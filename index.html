@@ -1969,6 +1969,222 @@
     //    onTitularClick / onSuplenteClick: (jugador_id) => void  // opcional para admin
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  DRAGGABLE HOCKEY FIELD · solo para admin
+    //  Cancha SVG donde el admin arrastra fichas y se asignan a la posición
+    //  más cercana de la formación (snap). Si suelta fuera del campo, va a SUB.
+    //  Soporta mouse y touch.
+    // ═══════════════════════════════════════════════════════════════════════════
+    function DraggableHockeyField({ formacion, convocados, rowOf, themeColor = "var(--plat)", onPosicionChange }) {
+      const positions = getFormationPositions(formacion);
+      const W = 320, H = 520; // un poco más alto para que entren los suplentes abajo
+      const pad = 18;
+      const fw = W - pad * 2;
+      const fh = 460 - pad * 2; // alto de la cancha (resto es la "zona de suplentes")
+      const SUB_ZONE_Y = 460; // a partir de acá es zona de suplentes
+
+      // Mapa de fichas con su posición actual { jugador_id: {x, y} } en coords SVG
+      // Si está en SUB o sin asignar → x/y se calcula sobre la zona de suplentes
+      // Si está en cancha → coordenadas de la posición correspondiente
+      const svgRef = useRef(null);
+      const [dragging, setDragging] = useState(null); // { jugadorId, x, y, originPos }
+
+      // Suplentes que se acomodan en la fila de abajo
+      const subs = convocados.filter(j => {
+        const r = rowOf(j.id);
+        return r?.es_titular === false || r?.field_pos === "SUB" || (r?.field_pos == null && r?.es_titular == null);
+      });
+      // Posición visual de cada suplente (en grilla)
+      const subPositionOf = (idx) => {
+        const colCount = Math.max(4, Math.ceil(subs.length / 2));
+        const col = idx % colCount;
+        const row = Math.floor(idx / colCount);
+        const cellW = fw / colCount;
+        const cellH = 28;
+        return {
+          x: pad + col * cellW + cellW / 2,
+          y: SUB_ZONE_Y + 22 + row * cellH,
+        };
+      };
+
+      // Coordenadas en SVG (px) para una fichita por jugador
+      const pxOf = (jugador) => {
+        const r = rowOf(jugador.id);
+        if (r?.es_titular === true && r?.field_pos && positions[r.field_pos]) {
+          const p = positions[r.field_pos];
+          return {
+            x: pad + (p.x / 100) * fw,
+            y: pad + (p.y / 100) * (fh),
+          };
+        }
+        // Es suplente o sin asignar → ubicación en zona de suplentes
+        const idx = subs.findIndex(s => s.id === jugador.id);
+        return subPositionOf(idx >= 0 ? idx : 0);
+      };
+
+      // Detectar la posición de la cancha MÁS CERCANA a (x, y)
+      // Devuelve clave (GK, LB, etc.) o null si está en zona suplentes
+      const closestPosition = (x, y) => {
+        if (y >= SUB_ZONE_Y - 10) return null; // está abajo → suplente
+        let best = null;
+        let bestDist = Infinity;
+        for (const [key, p] of Object.entries(positions)) {
+          const px = pad + (p.x / 100) * fw;
+          const py = pad + (p.y / 100) * fh;
+          const d = Math.hypot(px - x, py - y);
+          if (d < bestDist) { bestDist = d; best = key; }
+        }
+        return best;
+      };
+
+      // ─── Helpers de evento (mouse / touch unificados) ─────────────────────────
+      const getEventPoint = (e) => {
+        const svg = svgRef.current;
+        if (!svg) return { x: 0, y: 0 };
+        const rect = svg.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        // Convertir a coordenadas del viewBox
+        return {
+          x: ((clientX - rect.left) / rect.width) * W,
+          y: ((clientY - rect.top) / rect.height) * H,
+        };
+      };
+
+      const handlePointerDown = (jugador) => (e) => {
+        e.preventDefault();
+        const p = getEventPoint(e);
+        const r = rowOf(jugador.id);
+        const originPos = r?.es_titular === true ? r.field_pos : "SUB";
+        setDragging({ jugadorId: jugador.id, x: p.x, y: p.y, originPos });
+      };
+
+      // Mover el drag (window events para que no se pierda si el cursor sale del SVG)
+      useEffect(() => {
+        if (!dragging) return;
+        const move = (e) => {
+          const p = getEventPoint(e);
+          setDragging(d => d ? { ...d, x: p.x, y: p.y } : null);
+          if (e.cancelable) e.preventDefault();
+        };
+        const up = () => {
+          if (!dragging) return;
+          // Decidir destino
+          const target = closestPosition(dragging.x, dragging.y);
+          if (target === null) {
+            // Fuera de cancha → suplente (solo si venía de cancha)
+            if (dragging.originPos !== "SUB") {
+              onPosicionChange(dragging.jugadorId, "SUB");
+            }
+          } else {
+            // Sobre cancha → snap a target
+            if (dragging.originPos !== target) {
+              onPosicionChange(dragging.jugadorId, target);
+            }
+          }
+          setDragging(null);
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("touchmove", move, { passive: false });
+        window.addEventListener("mouseup", up);
+        window.addEventListener("touchend", up);
+        return () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("touchmove", move);
+          window.removeEventListener("mouseup", up);
+          window.removeEventListener("touchend", up);
+        };
+      }, [dragging]);
+
+      // Render auxiliar: ficha
+      const renderFicha = (jugador, posKey) => {
+        const isDragging = dragging?.jugadorId === jugador.id;
+        const isGK = posKey === "GK";
+        const isSub = !posKey || posKey === "SUB";
+        const pos = isDragging ? { x: dragging.x, y: dragging.y } : pxOf(jugador);
+        const fillColor = isSub ? "var(--red)" : (isGK ? "var(--gold)" : themeColor);
+        const r = 14;
+        const apellido = (jugador.nombre || "").split(",")[0].split(" ")[0].slice(0, 10);
+        return (
+          <g key={jugador.id} style={{cursor: isDragging ? "grabbing" : "grab", touchAction:"none"}}
+             onMouseDown={handlePointerDown(jugador)}
+             onTouchStart={handlePointerDown(jugador)}
+             opacity={isDragging ? 0.85 : 1}>
+            <circle cx={pos.x} cy={pos.y} r={r}
+              fill={fillColor} stroke="var(--bg)" strokeWidth={2}
+              style={{filter: isDragging ? "drop-shadow(0 4px 8px rgba(0,0,0,0.5))" : "none"}}/>
+            <text x={pos.x} y={pos.y + 4} textAnchor="middle"
+              fontSize={12} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
+              {jugador.numero ?? "?"}
+            </text>
+            {!isDragging && (
+              <text x={pos.x} y={pos.y + r + 11} textAnchor="middle"
+                fontSize={8} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
+                {apellido.toUpperCase()}
+              </text>
+            )}
+          </g>
+        );
+      };
+
+      // Renderizar todas las fichas: las que están en cancha y las suplentes (en la zona inferior)
+      // Importante: las fichas se renderizan en orden, la que arrastras al final (para que quede arriba)
+      const sortedConv = [...convocados].sort((a, b) => {
+        if (dragging?.jugadorId === a.id) return 1;
+        if (dragging?.jugadorId === b.id) return -1;
+        return 0;
+      });
+
+      return (
+        <div>
+          <div style={{padding:"6px 10px", marginBottom:8, background:"rgba(45,157,111,0.08)", border:"1px solid rgba(45,157,111,0.25)", borderRadius:4, fontSize:11, color:"var(--white-soft)", display:"flex", alignItems:"center", gap:8}}>
+            <span style={{fontSize:14}}>🤚</span>
+            <span>Arrastrá las fichas dentro de la cancha para asignar posiciones · fuera del campo → suplente</span>
+          </div>
+          <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
+            {/* Cancha (fondo) */}
+            <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.15)" strokeWidth={1.5} rx={4}/>
+            {/* Línea de mediocampo */}
+            <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.10)" strokeWidth={1}/>
+            {/* Líneas de 23m */}
+            <line x1={pad} y1={pad + fh * 0.26} x2={pad + fw} y2={pad + fh * 0.26} stroke="rgba(255,255,255,0.06)" strokeWidth={0.8} strokeDasharray="4 4"/>
+            <line x1={pad} y1={pad + fh * 0.74} x2={pad + fw} y2={pad + fh * 0.74} stroke="rgba(255,255,255,0.06)" strokeWidth={0.8} strokeDasharray="4 4"/>
+            {/* Área */}
+            <rect x={pad + fw/2 - fw*0.25} y={pad + fh*0.88} width={fw*0.5} height={fh*0.12}
+              fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1} rx={2}/>
+            {/* Arco */}
+            <circle cx={pad + fw/2} cy={pad + fh*0.94} r={4} fill="none" stroke="rgba(255,255,255,0.2)"/>
+
+            {/* Posiciones fantasma (círculos grises punteados) */}
+            {Object.entries(positions).map(([key, p]) => {
+              const cx = pad + (p.x / 100) * fw;
+              const cy = pad + (p.y / 100) * fh;
+              return (
+                <g key={key}>
+                  <circle cx={cx} cy={cy} r={15}
+                    fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="2 3"/>
+                  <text x={cx} y={cy + 4} textAnchor="middle"
+                    fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.25)" fontFamily="var(--mono)" pointerEvents="none">
+                    {key}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Línea divisoria: zona de suplentes */}
+            <line x1={0} y1={SUB_ZONE_Y} x2={W} y2={SUB_ZONE_Y} stroke="rgba(255,255,255,0.20)" strokeWidth={1} strokeDasharray="3 3"/>
+            <text x={W/2} y={SUB_ZONE_Y + 12} textAnchor="middle"
+              fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.4)" fontFamily="var(--mono)" letterSpacing={2}>
+              SUPLENTES
+            </text>
+
+            {/* Fichas (jugadores) */}
+            {sortedConv.map(j => renderFicha(j, rowOf(j.id)?.field_pos))}
+          </svg>
+        </div>
+      );
+    }
+
     function HockeyField({ formacion, titulares, suplentes, themeColor = "var(--plat)", onTitularClick, onSuplenteClick, emptySlotsCount = 5 }) {
       const positions = getFormationPositions(formacion);
       const W = 320, H = 480;
@@ -5073,6 +5289,7 @@
         estado: jugador.estado || "activo",
         carnet_aahba: jugador.carnet_aahba || "",
         es_capitan: jugador.es_capitan || false,
+        fecha_nacimiento: jugador.fecha_nacimiento || "",
         telefono: jugador.telefono || "",
         email: jugador.email || "",
         // Médicos
@@ -5099,6 +5316,7 @@
           club_id: club.id,
           numero: data.numero ? parseInt(data.numero) : null,
           apto_medico_vencimiento: data.apto_medico_vencimiento || null,
+          fecha_nacimiento: data.fecha_nacimiento || null,
         };
         const { error } = isNew
           ? await sb.from("jugadores").insert(payload)
@@ -5119,7 +5337,7 @@
             <CollapsibleSection
               title="DATOS BÁSICOS"
               icon="📋"
-              count="9"
+              count="10"
               countColor="var(--plat)"
               open={openBasicos}
               onToggle={() => setOpenBasicos(v => !v)}
@@ -5159,6 +5377,22 @@
                       {data.es_capitan ? "🎖️ Es capitán/a del equipo" : "No es capitán/a"}
                     </span>
                   </label>
+                </Field>
+                <Field label="Fecha de nacimiento">
+                  <input type="date" value={data.fecha_nacimiento} onChange={e => u("fecha_nacimiento", e.target.value)} style={inputStyle}/>
+                  {data.fecha_nacimiento && (
+                    <div style={{fontSize:10, color:"var(--white-dim)", marginTop:4, fontFamily:"var(--mono)"}}>
+                      {(() => {
+                        const fn = new Date(data.fecha_nacimiento);
+                        if (isNaN(fn)) return "";
+                        const today = new Date();
+                        let age = today.getFullYear() - fn.getFullYear();
+                        const m = today.getMonth() - fn.getMonth();
+                        if (m < 0 || (m === 0 && today.getDate() < fn.getDate())) age--;
+                        return `${age} años`;
+                      })()}
+                    </div>
+                  )}
                 </Field>
                 <Field label="Teléfono">
                   <input type="tel" value={data.telefono} onChange={e => u("telefono", e.target.value)} style={inputStyle} placeholder="11 1234-5678"/>
@@ -6176,53 +6410,77 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         <div>
           <FormacionHeader formacion={formacion} onFormacionChange={onFormacionChange} savingFormacion={savingFormacion}/>
 
-          {/* Campo SVG */}
+          {/* Campo SVG con drag & drop */}
           <div style={{padding:14, background:"rgba(0,0,0,0.2)", borderRadius:6, marginBottom:14}}>
-            <HockeyField
+            <DraggableHockeyField
               formacion={formacion}
-              titulares={titulares}
-              suplentes={suplentes}
+              convocados={convocados}
+              rowOf={rowOf}
               themeColor={club.theme_primary}
-              emptySlotsCount={Math.max(suplentes.length, 4)}
+              onPosicionChange={setPosicion}
             />
           </div>
 
-          {/* Lista de convocados con selector de posición */}
-          <div style={{fontSize:9, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", marginBottom:8, fontWeight:700}}>
-            ASIGNAR POSICIONES ({convocados.length} CONVOCADOS)
-          </div>
-          <div style={{display:"flex", flexDirection:"column", gap:6}}>
-            {convocados.map(j => {
-              const r = rowOf(j.id);
-              const currentPos = r?.es_titular ? r.field_pos : (r?.es_titular === false ? "SUB" : "");
-              return (
-                <div key={j.id} style={{padding:10, background:"rgba(255,255,255,0.02)", borderRadius:6, display:"flex", alignItems:"center", gap:10}}>
-                  <span style={{minWidth:32, fontSize:12, fontWeight:900, color:"var(--white-soft)", fontFamily:"var(--mono)", textAlign:"center", flexShrink:0}}>
-                    {j.numero ?? "--"}
-                  </span>
-                  <div style={{flex:1, minWidth:0, fontSize:12, fontWeight:600}}>
-                    {j.nombre || "(sin nombre)"}
-                  </div>
-                  <select value={currentPos} onChange={e => setPosicion(j.id, e.target.value)} style={{...inputStyle, width:130, padding:"5px 8px", fontSize:11, flexShrink:0}}>
-                    <option value="">— Sin asignar —</option>
-                    <option value="SUB">🟥 Suplente</option>
-                    <optgroup label="En cancha">
-                      {Object.entries(positions).map(([key, p]) => (
-                        <option key={key} value={key}>{key} · {p.label}</option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-              );
-            })}
-          </div>
-
           {sinAsignar.length > 0 && (
-            <div style={{marginTop:10, padding:10, background:"rgba(240,208,80,0.08)", border:"1px solid rgba(240,208,80,0.3)", borderRadius:6, fontSize:11, color:"var(--white-soft)"}}>
-              ⚠️ Faltan asignar {sinAsignar.length} jugador{sinAsignar.length > 1 ? "es" : ""} (sin posición ni como suplente).
+            <div style={{marginBottom:10, padding:10, background:"rgba(240,208,80,0.08)", border:"1px solid rgba(240,208,80,0.3)", borderRadius:6, fontSize:11, color:"var(--white-soft)"}}>
+              ⚠️ {sinAsignar.length} jugador{sinAsignar.length > 1 ? "es" : ""} sin asignar — aparecen en la zona de suplentes.
             </div>
           )}
+
+          {/* Dropdown clásico (secundario, colapsado) */}
+          <DropdownAsignador
+            convocados={convocados}
+            rowOf={rowOf}
+            positions={positions}
+            setPosicion={setPosicion}
+          />
         </div>
+      );
+    }
+
+    // ─── Asignador clásico por dropdown (modo secundario, colapsado) ─────────
+    function DropdownAsignador({ convocados, rowOf, positions, setPosicion }) {
+      const [open, setOpen] = useState(false);
+      return (
+        <CollapsibleSection
+          title="ASIGNAR POR LISTA"
+          icon="📋"
+          count={convocados.length}
+          countColor="var(--plat)"
+          open={open}
+          onToggle={() => setOpen(v => !v)}
+        >
+          <div style={{padding:10}}>
+            <div style={{fontSize:11, color:"var(--white-dim)", marginBottom:8, lineHeight:1.4}}>
+              Si preferís asignar las posiciones desde un dropdown en vez de arrastrar:
+            </div>
+            <div style={{display:"flex", flexDirection:"column", gap:6}}>
+              {convocados.map(j => {
+                const r = rowOf(j.id);
+                const currentPos = r?.es_titular ? r.field_pos : (r?.es_titular === false ? "SUB" : "");
+                return (
+                  <div key={j.id} style={{padding:8, background:"rgba(255,255,255,0.02)", borderRadius:6, display:"flex", alignItems:"center", gap:10}}>
+                    <span style={{minWidth:28, fontSize:11, fontWeight:900, color:"var(--white-soft)", fontFamily:"var(--mono)", textAlign:"center", flexShrink:0}}>
+                      {j.numero ?? "--"}
+                    </span>
+                    <div style={{flex:1, minWidth:0, fontSize:11, fontWeight:600}}>
+                      {j.nombre || "(sin nombre)"}
+                    </div>
+                    <select value={currentPos} onChange={e => setPosicion(j.id, e.target.value)} style={{...inputStyle, width:130, padding:"4px 6px", fontSize:10, flexShrink:0}}>
+                      <option value="">— Sin asignar —</option>
+                      <option value="SUB">🟥 Suplente</option>
+                      <optgroup label="En cancha">
+                        {Object.entries(positions).map(([key, p]) => (
+                          <option key={key} value={key}>{key} · {p.label}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </CollapsibleSection>
       );
     }
 
