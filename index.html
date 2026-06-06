@@ -7496,10 +7496,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
       const handleDragStart = (jugador) => (e) => {
         if (animating) return;
-        // Solo se pueden arrastrar los disponibles (suplentes)
-        if (state.formacionActual[jugador.id]) return;
-        // Tampoco si ya tiene un cambio pendiente
-        if (cambiosPendientes.some(c => c.entra_id === jugador.id)) return;
+        // Bloquear el drag si ese jugador ya tiene un cambio pendiente (sale o entra)
+        if (cambiosPendientes.some(c => c.sale_id === jugador.id || c.entra_id === jugador.id)) return;
         e.preventDefault();
         const p = getEventPoint(e);
         setDraggingId(jugador.id);
@@ -7514,23 +7512,67 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           if (e.cancelable) e.preventDefault();
         };
         const up = () => {
-          // Detectar si soltó sobre un titular
           if (!dragPos) { setDraggingId(null); return; }
-          // Encontrar el titular más cercano (dentro de un radio)
-          let masCercano = null;
-          let bestDist = 35; // tolerancia generosa
+
+          const arrastrado = jugadores.find(j => j.id === draggingId);
+          const arrastradoEnCancha = !!state.formacionActual[draggingId];
+
+          // 1. Buscar TITULAR más cercano (entre los que están en cancha)
+          let titularCercano = null;
+          let bestDistT = 35;
           for (const t of enCancha) {
-            // Si ese titular ya tiene un cambio pendiente, no se puede
-            if (cambiosPendientes.some(c => c.sale_id === t.id)) continue;
+            if (t.id === draggingId) continue; // no soltarse sobre sí mismo
+            if (cambiosPendientes.some(c => c.sale_id === t.id || c.entra_id === t.id)) continue;
             const pt = pxOfJugador(t);
             if (!pt) continue;
             const d = Math.hypot(pt.x - dragPos.x, pt.y - dragPos.y);
-            if (d < bestDist) { bestDist = d; masCercano = t; }
+            if (d < bestDistT) { bestDistT = d; titularCercano = t; }
           }
-          if (masCercano) {
-            // Agregar cambio pendiente
-            setCambiosPendientes(prev => [...prev, { sale_id: masCercano.id, entra_id: draggingId }]);
+
+          // 2. Buscar SUPLENTE más cercano (entre los disponibles)
+          let suplenteCercano = null;
+          let bestDistS = 35;
+          for (const s of disponibles) {
+            if (s.id === draggingId) continue;
+            if (cambiosPendientes.some(c => c.sale_id === s.id || c.entra_id === s.id)) continue;
+            const ps = pxOfJugador(s);
+            if (!ps) continue;
+            const d = Math.hypot(ps.x - dragPos.x, ps.y - dragPos.y);
+            if (d < bestDistS) { bestDistS = d; suplenteCercano = s; }
           }
+
+          // Elegir el más cercano entre titular y suplente
+          let destino = null;
+          let destinoEsTitular = false;
+          if (titularCercano && (!suplenteCercano || bestDistT <= bestDistS)) {
+            destino = titularCercano;
+            destinoEsTitular = true;
+          } else if (suplenteCercano) {
+            destino = suplenteCercano;
+            destinoEsTitular = false;
+          }
+
+          if (destino) {
+            if (arrastradoEnCancha && destinoEsTitular) {
+              // CASO 1: Titular → Titular = SWAP INMEDIATO (no afecta relojes)
+              setState(s => {
+                const newFormacion = { ...s.formacionActual };
+                const posA = newFormacion[draggingId];
+                const posB = newFormacion[destino.id];
+                newFormacion[draggingId] = posB;
+                newFormacion[destino.id] = posA;
+                return { ...s, formacionActual: newFormacion };
+              });
+            } else if (!arrastradoEnCancha && destinoEsTitular) {
+              // CASO 2: Suplente → Titular = cambio pendiente (flujo original)
+              setCambiosPendientes(prev => [...prev, { sale_id: destino.id, entra_id: draggingId }]);
+            } else if (arrastradoEnCancha && !destinoEsTitular) {
+              // CASO 3: Titular → Suplente = cambio pendiente (inverso)
+              setCambiosPendientes(prev => [...prev, { sale_id: draggingId, entra_id: destino.id }]);
+            }
+            // CASO 4: Suplente → Suplente = nada (no tiene sentido)
+          }
+
           setDraggingId(null);
           setDragPos(null);
         };
@@ -7544,16 +7586,18 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           window.removeEventListener("mouseup", up);
           window.removeEventListener("touchend", up);
         };
-      }, [draggingId, dragPos, enCancha, cambiosPendientes]);
+      }, [draggingId, dragPos, enCancha, disponibles, cambiosPendientes, state.formacionActual, jugadores]);
 
       // ─── Confirmar cambios pendientes ─────────────────────────────────────
       const confirmarCambios = async () => {
         if (cambiosPendientes.length === 0) return;
+        // Paso 1: activar animación (las fichas viajan al destino con CSS transition)
         setAnimating(true);
-        // Esperar animación CSS de 700ms
-        await new Promise(r => setTimeout(r, 800));
+        // Esperar a que se complete la animación CSS (700ms + un margen)
+        await new Promise(r => setTimeout(r, 750));
 
-        // Aplicar los cambios al estado
+        // Paso 2: aplicar los cambios al estado + desactivar animación en el mismo batch
+        // (React 18 hace batching automático, así que ambos updates se aplican juntos)
         setState(s => {
           const minutoActual = Math.floor(s.segundosCuarto / 60);
           const newFormacion = { ...s.formacionActual };
@@ -7562,11 +7606,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const newCambios = [...s.cambios];
           for (const c of cambiosPendientes) {
             const fieldPos = newFormacion[c.sale_id];
-            delete newFormacion[c.sale_id]; // el que sale ya no está en cancha
-            newFormacion[c.entra_id] = fieldPos; // el que entra ocupa la posición
-            // Si la que entra todavía no tenía minutos, inicializarla
+            delete newFormacion[c.sale_id];
+            newFormacion[c.entra_id] = fieldPos;
             if (newMinutos[c.entra_id] == null) newMinutos[c.entra_id] = 0;
-            // RESETEAR el tiempo "sin cambio" de ambos jugadores involucrados
             newSinCambio[c.sale_id] = 0;
             newSinCambio[c.entra_id] = 0;
             newCambios.push({
@@ -7675,18 +7717,16 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         }
 
         // Para la animación: la ficha "viaja" hacia su nueva posición
-        let animTransform = "";
+        // Calculamos el destino solo si está animando este jugador en cambio
+        let animOffset = { dx: 0, dy: 0 };
         if (isAnimating) {
-          // Calcular destino: si sale → va al lugar del que entra, si entra → va al lugar del que sale
           const cambio = cambiosPendientes.find(c => c.sale_id === jugador.id || c.entra_id === jugador.id);
           if (cambio) {
             const otroId = cambio.sale_id === jugador.id ? cambio.entra_id : cambio.sale_id;
             const otroJugador = jugadores.find(j => j.id === otroId);
             const otroPos = otroJugador ? pxOfJugador(otroJugador) : null;
             if (otroPos) {
-              const dx = otroPos.x - basePos.x;
-              const dy = otroPos.y - basePos.y;
-              animTransform = `translate(${dx}, ${dy})`;
+              animOffset = { dx: otroPos.x - basePos.x, dy: otroPos.y - basePos.y };
             }
           }
         }
@@ -7701,17 +7741,17 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
         return (
           <g key={jugador.id}
+             className={isAnimating ? "ficha-animating" : ""}
+             transform={`translate(${animOffset.dx}, ${animOffset.dy})`}
              style={{
-               cursor: !isInCancha ? "grab" : "default",
+               cursor: "grab",
                touchAction:"none",
-               transform: animTransform,
-               transition: isAnimating ? "transform 0.7s cubic-bezier(.4,1.4,.6,1)" : "none",
              }}
              opacity={isDragging ? 0.85 : (isPendienteSale && !animating ? 0.6 : 1)}
-             onMouseDown={!isInCancha ? handleDragStart(jugador) : undefined}
-             onTouchStart={!isInCancha ? handleDragStart(jugador) : undefined}>
+             onMouseDown={handleDragStart(jugador)}
+             onTouchStart={handleDragStart(jugador)}>
             {/* Hit area invisible (más grande para mobile) */}
-            <circle cx={pos.x} cy={pos.y} r={hitR} fill="transparent" pointerEvents={isInCancha ? "none" : "all"}/>
+            <circle cx={pos.x} cy={pos.y} r={hitR} fill="transparent" pointerEvents="all"/>
             {/* Ficha */}
             <circle cx={pos.x} cy={pos.y} r={r}
               fill={fillColor}
@@ -7791,6 +7831,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             @keyframes pulseRed {
               0%, 100% { opacity: 1; }
               50% { opacity: 0.4; }
+            }
+            /* Animación de fichas en el cambio */
+            g.ficha-animating {
+              transition: transform 0.7s cubic-bezier(0.4, 1.6, 0.6, 1);
+              -webkit-transition: transform 0.7s cubic-bezier(0.4, 1.6, 0.6, 1);
             }
           `}</style>
 
@@ -7881,7 +7926,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           {/* ─── CANCHA SVG ─── */}
           <div style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
             <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:6, textAlign:"center", lineHeight:1.4}}>
-              <span style={{fontSize:14}}>🤚</span> Arrastrá un suplente (rojo) sobre un titular para marcar el cambio
+              <span style={{fontSize:14}}>🤚</span> Arrastrá fichas: suplente↔titular = cambio · titular↔titular = swap directo
             </div>
             <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
               {/* Cancha */}
