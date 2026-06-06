@@ -5807,19 +5807,132 @@
     // ═══════════════════════════════════════════════════════════════════════════
 
     // ═══════════════════════════════════════════════════════════════════════════
+    //  HELPERS COMUNES PARA APLICAR UNA PLANILLA AAHBA A UNA FECHA
+    //  Usados por el importer single y el batch.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Normalizador de nombre para comparar
+    const _normName = s => (s || "").toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "");
+
+    // Decide cuál equipo del PDF es el nuestro (por carnets matcheados o por fallback)
+    function pickMiEquipo(parsed, jugadores) {
+      const carnetSet = new Set(jugadores.map(j => j.carnet_aahba).filter(Boolean));
+      const matchCount = jugs => jugs.filter(j => carnetSet.has(j.carnet)).length;
+      const localMatches = matchCount(parsed.equipoLocal.jugadores);
+      const visitMatches = matchCount(parsed.equipoVisitante.jugadores);
+      if (localMatches >= visitMatches && localMatches > 0) {
+        return { miEquipo: parsed.equipoLocal, equipoRival: parsed.equipoVisitante, lado: "L" };
+      }
+      if (visitMatches > 0) {
+        return { miEquipo: parsed.equipoVisitante, equipoRival: parsed.equipoLocal, lado: "V" };
+      }
+      return null;
+    }
+
+    // Detectar jugadoras del PDF que NO están en el plantel
+    // Devuelve [{ numero, nombre, carnet }, ...]
+    function detectarNuevasJugadoras(miEquipo, jugadores) {
+      const nuevas = [];
+      for (const pJ of miEquipo.jugadores) {
+        let j = pJ.carnet ? jugadores.find(x => x.carnet_aahba === pJ.carnet) : null;
+        if (!j) j = jugadores.find(x => _normName(x.nombre) === _normName(pJ.nombre));
+        if (!j) {
+          nuevas.push({ numero: pJ.numero, nombre: pJ.nombre, carnet: pJ.carnet });
+        }
+      }
+      return nuevas;
+    }
+
+    // Aplica una planilla a una fecha. Asume que las nuevas ya están creadas en `jugadores`.
+    // Devuelve { convocados, bajas, goles, tarjetas, marker }
+    async function applyPlanillaAFecha(parsed, fecha, jugadores, miEquipo, equipoRival) {
+      const activos = jugadores.filter(j => !j.estado || j.estado === "activo");
+      const matchedIds = new Set();
+      let convocados = 0, golesT = 0, tarjT = 0;
+
+      for (const pJ of miEquipo.jugadores) {
+        let j = pJ.carnet ? jugadores.find(x => x.carnet_aahba === pJ.carnet) : null;
+        if (!j) j = jugadores.find(x => _normName(x.nombre) === _normName(pJ.nombre));
+        if (!j) continue;
+        matchedIds.add(j.id);
+        convocados++;
+        if (pJ.goles > 0) golesT += pJ.goles;
+        if (pJ.tarjetaVerde || pJ.tarjetaAmarilla > 0 || pJ.tarjetaRoja) tarjT++;
+
+        await sb.from("fecha_jugadores").upsert({
+          fecha_id: fecha.id,
+          jugador_id: j.id,
+          status: "convocado",
+          motivo: null,
+          goles: pJ.goles,
+          tarjeta_verde: pJ.tarjetaVerde,
+          tarjeta_amarilla: pJ.tarjetaAmarilla,
+          tarjeta_roja: pJ.tarjetaRoja,
+        }, { onConflict: "fecha_id,jugador_id" });
+      }
+
+      // BAJA a los activos del plantel que no aparecen
+      let bajas = 0;
+      for (const j of activos) {
+        if (matchedIds.has(j.id)) continue;
+        await sb.from("fecha_jugadores").upsert({
+          fecha_id: fecha.id,
+          jugador_id: j.id,
+          status: "baja",
+          motivo: "deportivo",
+        }, { onConflict: "fecha_id,jugador_id" });
+        bajas++;
+      }
+
+      // Marcador + árbitros + cerrar
+      const fechaUpdates = { result_cargado: true };
+      if (miEquipo.golesEquipo != null) fechaUpdates.goles_propio = miEquipo.golesEquipo;
+      if (equipoRival.golesEquipo != null) fechaUpdates.goles_rival = equipoRival.golesEquipo;
+      if (parsed.arbitros) fechaUpdates.arbitros = parsed.arbitros;
+      await sb.from("fechas").update(fechaUpdates).eq("id", fecha.id);
+
+      return {
+        convocados, bajas, goles: golesT, tarjetas: tarjT,
+        marker: `${miEquipo.golesEquipo ?? "?"}-${equipoRival.golesEquipo ?? "?"}`,
+      };
+    }
+
+    // Crear N jugadoras nuevas en el plantel. Devuelve un array con los registros creados.
+    async function crearJugadorasNuevas(nuevas, clubId) {
+      if (nuevas.length === 0) return [];
+      const payload = nuevas.map(n => ({
+        club_id: clubId,
+        numero: n.numero ?? null,
+        nombre: n.nombre,
+        carnet_aahba: n.carnet || null,
+        estado: "activo",
+      }));
+      const { data, error } = await sb.from("jugadores").insert(payload).select();
+      if (error) {
+        console.error("Error creando nuevas jugadoras:", error);
+        return [];
+      }
+      return data || [];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //  BATCH PLANILLAS IMPORTER · sube N PDFs y los asocia a fechas por rival
-    //  Reutiliza parsePlanillaAAHBA + extractPdfText + lógica de import single.
+    //  Flujo de 2 pasadas:
+    //    1. Parsea todos los PDFs y muestra lista de jugadoras nuevas detectadas
+    //    2. Usuario confirma → se agregan al plantel + se procesan todos los PDFs
     // ═══════════════════════════════════════════════════════════════════════════
     function BatchPlanillasImporter({ club, session, fechas, onDone, onCancel }) {
-      const [files, setFiles] = useState([]); // [File, File, ...]
-      const [overwrite, setOverwrite] = useState(false); // false = skip ya cargados
-      const [processing, setProcessing] = useState(false);
-      const [progress, setProgress] = useState(0); // 0..files.length
-      const [results, setResults] = useState([]); // [{file, status, message, fecha?}]
-      const [done, setDone] = useState(false);
-
-      // Pre-cargar jugadores del club (los necesitamos para matchear carnets)
+      const [files, setFiles] = useState([]);
+      const [overwrite, setOverwrite] = useState(false);
+      const [phase, setPhase] = useState("select"); // select | discovering | confirm | applying | done
+      const [progress, setProgress] = useState(0);
+      const [parsedFiles, setParsedFiles] = useState([]); // [{ file, parsed, miEquipo, equipoRival, fecha, skipReason }]
+      const [nuevasDescubiertas, setNuevasDescubiertas] = useState([]); // [{ numero, nombre, carnet }]
+      const [results, setResults] = useState([]);
       const [jugadores, setJugadores] = useState([]);
+
       useEffect(() => {
         (async () => {
           const { data } = await sb.from("jugadores").select("*").eq("club_id", club.id);
@@ -5827,147 +5940,141 @@
         })();
       }, [club.id]);
 
-      // Normaliza un nombre de rival para comparar
-      const norm = s => (s || "").toLowerCase()
+      // Normaliza nombre de rival para matchear con las fechas del club
+      const normRival = s => (s || "").toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/\b(c\.?a\.?|r\.?c\.?|club|s\.?i\.?c\.?|sports?|hockey)\b/gi, "")
-        .replace(/[^a-z0-9]/g, "")
-        .trim();
+        .replace(/[^a-z0-9]/g, "").trim();
 
-      // Encontrar la fecha que matchea un rival (por norma fuzzy)
       const findFechaForRival = (rivalDelPdf) => {
-        const target = norm(rivalDelPdf);
+        const target = normRival(rivalDelPdf);
         if (!target) return null;
-        // Match exacto normalizado
-        let m = fechas.find(f => norm(f.rival) === target);
+        let m = fechas.find(f => normRival(f.rival) === target);
         if (m) return m;
-        // Match parcial (uno contiene al otro)
         m = fechas.find(f => {
-          const fr = norm(f.rival);
+          const fr = normRival(f.rival);
           return fr && (fr.includes(target) || target.includes(fr));
         });
         return m;
       };
 
-      // Procesar un PDF: parsear → detectar mi equipo → aplicar a la fecha
-      const processOnePdf = async (file) => {
-        try {
-          const text = await extractPdfText(file);
-          const parsed = parsePlanillaAAHBA(text);
+      // ─── PASADA 1: parsear todos los PDFs y descubrir nuevas jugadoras ───────
+      const handleDiscover = async () => {
+        if (files.length === 0) return;
+        setPhase("discovering");
+        setProgress(0);
 
-          if (parsed.equipoLocal.jugadores.length === 0 && parsed.equipoVisitante.jugadores.length === 0) {
-            return { file, status: "error", message: "No se detectaron jugadores en el PDF" };
+        const parsed = [];
+        const nuevasMap = new Map(); // key (carnet o nombre normalizado) → {numero, nombre, carnet}
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          try {
+            const text = await extractPdfText(file);
+            const parsedPdf = parsePlanillaAAHBA(text);
+
+            if (parsedPdf.equipoLocal.jugadores.length === 0 && parsedPdf.equipoVisitante.jugadores.length === 0) {
+              parsed.push({ file, skipReason: "No se detectaron jugadores en el PDF" });
+              setProgress(i + 1);
+              continue;
+            }
+
+            const pick = pickMiEquipo(parsedPdf, jugadores);
+            if (!pick) {
+              parsed.push({ file, skipReason: "No detecté tu equipo (sin matches de carnet)" });
+              setProgress(i + 1);
+              continue;
+            }
+
+            const fecha = findFechaForRival(pick.equipoRival.nombre);
+            if (!fecha) {
+              parsed.push({ file, parsed: parsedPdf, ...pick, skipReason: `No encontré fecha vs "${pick.equipoRival.nombre}"` });
+              setProgress(i + 1);
+              continue;
+            }
+
+            if (fecha.result_cargado && !overwrite) {
+              parsed.push({ file, parsed: parsedPdf, ...pick, fecha, skipReason: "Ya tenía resultado cargado" });
+              setProgress(i + 1);
+              continue;
+            }
+
+            // Detectar nuevas jugadoras de este PDF
+            const nuevasDePdf = detectarNuevasJugadoras(pick.miEquipo, jugadores);
+            for (const n of nuevasDePdf) {
+              const key = n.carnet || _normName(n.nombre);
+              if (!nuevasMap.has(key)) nuevasMap.set(key, n);
+            }
+
+            parsed.push({ file, parsed: parsedPdf, ...pick, fecha });
+          } catch (e) {
+            parsed.push({ file, skipReason: `Error: ${e.message}` });
           }
-
-          // Decidir cuál equipo soy yo (por carnets match)
-          const carnetSet = new Set(jugadores.map(j => j.carnet_aahba).filter(Boolean));
-          const matchCount = jugs => jugs.filter(j => carnetSet.has(j.carnet)).length;
-          const localMatches = matchCount(parsed.equipoLocal.jugadores);
-          const visitMatches = matchCount(parsed.equipoVisitante.jugadores);
-
-          let miEquipo, equipoRival;
-          if (localMatches >= visitMatches && localMatches > 0) {
-            miEquipo = parsed.equipoLocal; equipoRival = parsed.equipoVisitante;
-          } else if (visitMatches > 0) {
-            miEquipo = parsed.equipoVisitante; equipoRival = parsed.equipoLocal;
-          } else {
-            return { file, status: "error", message: "No detecté a tu equipo en el PDF (sin matches de carnet)" };
-          }
-
-          // Buscar la fecha que corresponde por rival
-          const fecha = findFechaForRival(equipoRival.nombre);
-          if (!fecha) {
-            return { file, status: "no_match", message: `No encontré una fecha contra "${equipoRival.nombre}"` };
-          }
-
-          // Si la fecha ya tiene resultado y NO se va a sobrescribir, skip
-          if (fecha.result_cargado && !overwrite) {
-            return { file, status: "skipped", fecha, message: "Ya tenía resultado cargado", marker: `${fecha.goles_propio ?? "?"}-${fecha.goles_rival ?? "?"}` };
-          }
-
-          // Aplicar: matchear jugadores, marcar convocados, cargar goles/tarjetas
-          const nameNorm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-          const activos = jugadores.filter(j => !j.estado || j.estado === "activo");
-          const matchedIds = new Set();
-          let convocados = 0, golesT = 0, tarjT = 0;
-
-          // Procesar cada jugador del PDF
-          for (const pJ of miEquipo.jugadores) {
-            let j = pJ.carnet ? jugadores.find(x => x.carnet_aahba === pJ.carnet) : null;
-            if (!j) j = jugadores.find(x => nameNorm(x.nombre) === nameNorm(pJ.nombre));
-            if (!j) continue;
-            matchedIds.add(j.id);
-            convocados++;
-            if (pJ.goles > 0) golesT += pJ.goles;
-            if (pJ.tarjetaVerde || pJ.tarjetaAmarilla > 0 || pJ.tarjetaRoja) tarjT++;
-
-            // UPSERT en fecha_jugadores (igual que el import single)
-            await sb.from("fecha_jugadores").upsert({
-              fecha_id: fecha.id,
-              jugador_id: j.id,
-              status: "convocado",
-              motivo: null,
-              goles: pJ.goles,
-              tarjeta_verde: pJ.tarjetaVerde,
-              tarjeta_amarilla: pJ.tarjetaAmarilla,
-              tarjeta_roja: pJ.tarjetaRoja,
-            }, { onConflict: "fecha_id,jugador_id" });
-          }
-
-          // Marcar como BAJA a los activos que no aparecen
-          let bajas = 0;
-          for (const j of activos) {
-            if (matchedIds.has(j.id)) continue;
-            await sb.from("fecha_jugadores").upsert({
-              fecha_id: fecha.id,
-              jugador_id: j.id,
-              status: "baja",
-              motivo: "deportivo",
-            }, { onConflict: "fecha_id,jugador_id" });
-            bajas++;
-          }
-
-          // Guardar marcador + árbitros + cerrar
-          const fechaUpdates = { result_cargado: true };
-          if (miEquipo.golesEquipo != null) fechaUpdates.goles_propio = miEquipo.golesEquipo;
-          if (equipoRival.golesEquipo != null) fechaUpdates.goles_rival = equipoRival.golesEquipo;
-          if (parsed.arbitros) fechaUpdates.arbitros = parsed.arbitros;
-          await sb.from("fechas").update(fechaUpdates).eq("id", fecha.id);
-
-          return {
-            file, status: "ok", fecha,
-            marker: `${miEquipo.golesEquipo ?? "?"}-${equipoRival.golesEquipo ?? "?"}`,
-            message: `${convocados} convocados, ${bajas} bajas, ${golesT} gol${golesT !== 1 ? "es" : ""}, ${tarjT} con tarjeta`,
-          };
-        } catch (e) {
-          return { file, status: "error", message: e.message || "Error procesando" };
+          setProgress(i + 1);
         }
+
+        setParsedFiles(parsed);
+        setNuevasDescubiertas(Array.from(nuevasMap.values()));
+        setPhase("confirm");
       };
 
-      // Lanzar el proceso completo
-      const handleProcessAll = async () => {
-        if (files.length === 0) return;
-        setProcessing(true);
+      // ─── PASADA 2: agregar nuevas (si aceptan) y aplicar todos los PDFs ──────
+      const handleApply = async (agregarNuevas) => {
+        setPhase("applying");
         setProgress(0);
+
+        // Crear nuevas jugadoras si corresponde
+        let jugadoresUpd = jugadores;
+        if (agregarNuevas && nuevasDescubiertas.length > 0) {
+          const creadas = await crearJugadorasNuevas(nuevasDescubiertas, club.id);
+          jugadoresUpd = [...jugadores, ...creadas];
+        }
+
+        // Procesar cada PDF
         const res = [];
-        for (let i = 0; i < files.length; i++) {
-          const r = await processOnePdf(files[i]);
-          res.push(r);
+        const validParsedFiles = parsedFiles.filter(p => p.fecha && !p.skipReason);
+        for (let i = 0; i < parsedFiles.length; i++) {
+          const p = parsedFiles[i];
+          if (p.skipReason) {
+            res.push({
+              file: p.file, fecha: p.fecha,
+              status: p.fecha ? "skipped" : "no_match",
+              message: p.skipReason,
+            });
+          } else {
+            try {
+              const r = await applyPlanillaAFecha(p.parsed, p.fecha, jugadoresUpd, p.miEquipo, p.equipoRival);
+              res.push({
+                file: p.file, fecha: p.fecha, status: "ok",
+                marker: r.marker,
+                message: `${r.convocados} convocadas, ${r.bajas} bajas, ${r.goles} gol${r.goles !== 1 ? "es" : ""}, ${r.tarjetas} con tarjeta`,
+              });
+            } catch (e) {
+              res.push({
+                file: p.file, fecha: p.fecha, status: "error",
+                message: e.message || "Error aplicando",
+              });
+            }
+          }
           setResults([...res]);
           setProgress(i + 1);
         }
-        setProcessing(false);
-        setDone(true);
+
+        // Recargar jugadores
+        const { data: refreshedJug } = await sb.from("jugadores").select("*").eq("club_id", club.id);
+        setJugadores(refreshedJug || []);
+        setPhase("done");
       };
 
       const handleSelectFiles = (e) => {
         const f = Array.from(e.target.files || []);
         setFiles(f);
+        setParsedFiles([]);
+        setNuevasDescubiertas([]);
         setResults([]);
-        setDone(false);
+        setPhase("select");
       };
 
-      // Resumen final
       const summary = (() => {
         const ok = results.filter(r => r.status === "ok").length;
         const skipped = results.filter(r => r.status === "skipped").length;
@@ -5983,72 +6090,165 @@
             <div style={{fontSize:13, fontWeight:700, color:"var(--plat)", flex:1}}>📥 Cargar planillas en lote</div>
           </div>
 
-          {!done && (
-            <>
-              {/* Picker */}
-              <div style={{padding:14, background:"var(--plat-soft)", border:"1px solid var(--plat-border)", borderRadius:6, marginBottom:14}}>
-                <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:10, lineHeight:1.5}}>
-                  Subí <strong>todos los PDFs de planillas AAHBA</strong> que tengas (de partidos ya jugados). La app va a:
-                </div>
-                <ul style={{fontSize:11, color:"var(--white-dim)", paddingLeft:18, lineHeight:1.6, marginBottom:14}}>
-                  <li>Detectar el rival de cada PDF y buscar la fecha correspondiente</li>
-                  <li>Marcar como CONVOCADOS a las jugadoras que aparecen</li>
-                  <li>Marcar BAJA a las que no aparecen</li>
-                  <li>Cargar marcador, goles, tarjetas y árbitros</li>
-                </ul>
+          {/* ─── FASE: SELECT (elegir archivos) ─── */}
+          {phase === "select" && (
+            <div style={{padding:14, background:"var(--plat-soft)", border:"1px solid var(--plat-border)", borderRadius:6, marginBottom:14}}>
+              <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:10, lineHeight:1.5}}>
+                Subí <strong>todos los PDFs de planillas AAHBA</strong> que tengas. La app va a:
+              </div>
+              <ul style={{fontSize:11, color:"var(--white-dim)", paddingLeft:18, lineHeight:1.6, marginBottom:14}}>
+                <li>Parsear cada PDF y detectar jugadoras nuevas</li>
+                <li>Pedirte confirmación para agregar las nuevas al plantel</li>
+                <li>Aplicar todo: convocadas, goles, tarjetas, marcador y árbitros</li>
+              </ul>
 
-                <label style={{
-                  display:"block", padding:"14px 14px", borderRadius:6,
-                  cursor: processing ? "wait" : "pointer", marginBottom:12,
-                  border:"1px dashed var(--plat-border)", background:"rgba(45,157,111,0.04)",
-                  textAlign:"center", fontSize:13, color:"var(--plat)", fontWeight:600,
-                  opacity: processing ? 0.5 : 1
-                }}>
-                  {files.length > 0 ? `📄 ${files.length} archivo${files.length > 1 ? "s" : ""} seleccionado${files.length > 1 ? "s" : ""}` : "📄 Elegir PDFs (uno o varios)"}
-                  <input type="file" accept="application/pdf" multiple disabled={processing}
-                    onChange={handleSelectFiles} style={{display:"none"}}/>
-                </label>
+              <label style={{
+                display:"block", padding:"14px 14px", borderRadius:6, cursor:"pointer", marginBottom:12,
+                border:"1px dashed var(--plat-border)", background:"rgba(45,157,111,0.04)",
+                textAlign:"center", fontSize:13, color:"var(--plat)", fontWeight:600,
+              }}>
+                {files.length > 0 ? `📄 ${files.length} archivo${files.length > 1 ? "s" : ""} seleccionado${files.length > 1 ? "s" : ""}` : "📄 Elegir PDFs (uno o varios)"}
+                <input type="file" accept="application/pdf" multiple onChange={handleSelectFiles} style={{display:"none"}}/>
+              </label>
 
-                {/* Toggle sobrescribir */}
-                <label style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", cursor:"pointer", fontSize:12, color:"var(--white-soft)"}}>
-                  <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} style={{width:16, height:16}}/>
-                  <span>
-                    Sobrescribir fechas que ya tienen resultado cargado
-                    <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2}}>
-                      {overwrite ? "⚠️ Va a borrar lo cargado y reemplazar con el PDF" : "💡 Solo procesa fechas sin resultado (recomendado)"}
-                    </div>
-                  </span>
-                </label>
-
-                {/* Botón procesar */}
-                <button onClick={handleProcessAll} disabled={files.length === 0 || processing}
-                  style={{...btnPrimary, width:"100%", marginTop:14, fontSize:13}}>
-                  {processing
-                    ? `Procesando... ${progress}/${files.length}`
-                    : `Procesar ${files.length || "—"} planilla${files.length !== 1 ? "s" : ""} →`}
-                </button>
-
-                {processing && (
-                  <div style={{marginTop:10, height:6, background:"rgba(255,255,255,0.06)", borderRadius:3, overflow:"hidden"}}>
-                    <div style={{height:"100%", background:"var(--plat)", width:`${(progress / files.length) * 100}%`, transition:"width 0.3s ease"}}/>
+              <label style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", cursor:"pointer", fontSize:12, color:"var(--white-soft)"}}>
+                <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)} style={{width:16, height:16}}/>
+                <span>
+                  Sobrescribir fechas que ya tienen resultado cargado
+                  <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2}}>
+                    {overwrite ? "⚠️ Va a reemplazar lo cargado con el PDF nuevo" : "💡 Solo procesa fechas sin resultado (recomendado)"}
                   </div>
-                )}
+                </span>
+              </label>
+
+              <button onClick={handleDiscover} disabled={files.length === 0}
+                style={{...btnPrimary, width:"100%", marginTop:14, fontSize:13}}>
+                Analizar {files.length || "—"} planilla{files.length !== 1 ? "s" : ""} →
+              </button>
+            </div>
+          )}
+
+          {/* ─── FASE: DISCOVERING (parseando los PDFs) ─── */}
+          {phase === "discovering" && (
+            <div style={{padding:24, textAlign:"center", background:"var(--plat-soft)", borderRadius:6}}>
+              <div style={{fontSize:13, fontWeight:700, color:"var(--plat)", marginBottom:14}}>
+                Analizando {files.length} planilla{files.length !== 1 ? "s" : ""}...
+              </div>
+              <div style={{fontSize:11, color:"var(--white-dim)", fontFamily:"var(--mono)", marginBottom:10}}>
+                {progress} de {files.length}
+              </div>
+              <div style={{height:6, background:"rgba(255,255,255,0.06)", borderRadius:3, overflow:"hidden"}}>
+                <div style={{height:"100%", background:"var(--plat)", width:`${(progress / files.length) * 100}%`, transition:"width 0.3s ease"}}/>
+              </div>
+            </div>
+          )}
+
+          {/* ─── FASE: CONFIRM (mostrar nuevas + pedir confirmación) ─── */}
+          {phase === "confirm" && (
+            <div>
+              {/* Resumen del descubrimiento */}
+              <div style={{padding:14, background:"var(--plat-soft)", border:"1px solid var(--plat-border)", borderRadius:6, marginBottom:14}}>
+                <div style={{fontSize:12, fontWeight:700, color:"var(--white-soft)", marginBottom:10}}>
+                  📋 Resumen del análisis
+                </div>
+                <div style={{display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10, fontSize:11, color:"var(--white-soft)"}}>
+                  <div>
+                    <span style={{color:"var(--white-dim)"}}>Archivos analizados:</span>{" "}
+                    <strong>{parsedFiles.length}</strong>
+                  </div>
+                  <div>
+                    <span style={{color:"var(--white-dim)"}}>Listos para aplicar:</span>{" "}
+                    <strong style={{color:"var(--green)"}}>{parsedFiles.filter(p => !p.skipReason).length}</strong>
+                  </div>
+                </div>
               </div>
 
-              {/* Resultados parciales mientras procesa */}
-              {results.length > 0 && (
-                <BatchResultsList results={results}/>
+              {/* Lista de archivos saltados (si hay) */}
+              {parsedFiles.some(p => p.skipReason) && (
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:10, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:700, marginBottom:6}}>
+                    ⏭ ARCHIVOS QUE SE SALTAN
+                  </div>
+                  {parsedFiles.filter(p => p.skipReason).map((p, i) => (
+                    <div key={i} style={{padding:"6px 10px", background:"rgba(255,255,255,0.02)", borderRadius:4, fontSize:10, color:"var(--white-dim)", marginBottom:3, fontFamily:"var(--mono)"}}>
+                      {p.file.name} · {p.skipReason}
+                    </div>
+                  ))}
+                </div>
               )}
+
+              {/* Bloque de jugadoras nuevas detectadas */}
+              {nuevasDescubiertas.length > 0 ? (
+                <div style={{padding:14, background:"rgba(240,208,80,0.08)", border:"1px solid rgba(240,208,80,0.35)", borderRadius:6, marginBottom:14}}>
+                  <div style={{fontSize:12, fontWeight:700, color:"var(--gold)", marginBottom:8}}>
+                    👀 Detecté {nuevasDescubiertas.length} jugadora{nuevasDescubiertas.length !== 1 ? "s" : ""} nueva{nuevasDescubiertas.length !== 1 ? "s" : ""}
+                  </div>
+                  <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:10, lineHeight:1.5}}>
+                    Aparecen en las planillas pero <strong>no están en tu plantel actual</strong>. Si las agregás, se van a crear como activas con su número, nombre y carnet.
+                  </div>
+                  <div style={{maxHeight:240, overflowY:"auto", background:"rgba(0,0,0,0.2)", borderRadius:4, padding:6}}>
+                    {nuevasDescubiertas
+                      .sort((a, b) => (a.numero || 999) - (b.numero || 999))
+                      .map((n, i) => (
+                      <div key={i} style={{padding:"5px 8px", fontSize:11, color:"var(--white-soft)", borderBottom: i < nuevasDescubiertas.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", display:"flex", alignItems:"center", gap:8}}>
+                        <span style={{minWidth:24, fontFamily:"var(--mono)", color:"var(--gold)", fontWeight:700, textAlign:"center"}}>
+                          #{n.numero ?? "?"}
+                        </span>
+                        <span style={{flex:1, fontWeight:600}}>{n.nombre}</span>
+                        {n.carnet && <span style={{fontSize:10, color:"var(--white-dim)", fontFamily:"var(--mono)"}}>{n.carnet}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex", gap:8, marginTop:14}}>
+                    <button onClick={() => handleApply(false)} style={{...btnGhost, flex:1, fontSize:12}}>
+                      ✗ Ignorarlas
+                    </button>
+                    <button onClick={() => handleApply(true)} style={{...btnPrimary, flex:2, fontSize:12}}>
+                      ✓ Agregar al plantel y procesar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{padding:14, background:"rgba(45,157,111,0.08)", border:"1px solid rgba(45,157,111,0.3)", borderRadius:6, marginBottom:14}}>
+                  <div style={{fontSize:12, fontWeight:700, color:"var(--plat)", marginBottom:6}}>
+                    ✓ No detecté jugadoras nuevas
+                  </div>
+                  <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:14}}>
+                    Todas las jugadoras de las planillas ya están en tu plantel. Listo para aplicar.
+                  </div>
+                  <div style={{display:"flex", gap:8}}>
+                    <button onClick={() => setPhase("select")} style={{...btnGhost, flex:1, fontSize:12}}>← Atrás</button>
+                    <button onClick={() => handleApply(false)} style={{...btnPrimary, flex:2, fontSize:12}}>
+                      ✓ Procesar planillas
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── FASE: APPLYING (aplicando los cambios) ─── */}
+          {phase === "applying" && (
+            <>
+              <div style={{padding:14, background:"var(--plat-soft)", borderRadius:6, marginBottom:14}}>
+                <div style={{fontSize:13, fontWeight:700, color:"var(--plat)", marginBottom:10, textAlign:"center"}}>
+                  Aplicando... {progress}/{parsedFiles.length}
+                </div>
+                <div style={{height:6, background:"rgba(255,255,255,0.06)", borderRadius:3, overflow:"hidden"}}>
+                  <div style={{height:"100%", background:"var(--plat)", width:`${(progress / parsedFiles.length) * 100}%`, transition:"width 0.3s ease"}}/>
+                </div>
+              </div>
+              {results.length > 0 && <BatchResultsList results={results}/>}
             </>
           )}
 
-          {done && (
+          {/* ─── FASE: DONE (resumen final) ─── */}
+          {phase === "done" && (
             <>
-              {/* Resumen */}
               <div style={{
                 padding:14, marginBottom:14, borderRadius:6,
-                background: summary.errors > 0 || summary.noMatch > 0 ? "rgba(232,85,85,0.08)" : "rgba(45,157,111,0.10)",
-                border: `1px solid ${summary.errors > 0 || summary.noMatch > 0 ? "var(--red)" : "var(--plat)"}`
+                background: summary.errors > 0 ? "rgba(232,85,85,0.08)" : "rgba(45,157,111,0.10)",
+                border: `1px solid ${summary.errors > 0 ? "var(--red)" : "var(--plat)"}`
               }}>
                 <div style={{fontSize:13, fontWeight:700, color:"var(--white-soft)", marginBottom:6}}>
                   ✓ Proceso terminado
@@ -7059,6 +7259,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const [importMsg, setImportMsg] = useState(""); // resumen post-import
       const [showImporter, setShowImporter] = useState(false);
       const [pasteText, setPasteText] = useState("");
+      const [pendingImport, setPendingImport] = useState(null); // { parsed, miEquipo, equipoRival, nuevas }
 
       // Solo los convocados pueden recibir goles/tarjetas (los duda/baja no jugaron)
       const convocados = jugadores.filter(j => {
@@ -7140,9 +7341,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         return () => clearTimeout(timer);
       }, [resultNotas, fecha.id]);
 
-      // ─── Import de planilla AAHBA ────────────────────────────────────────
-      // Detecta jugadores en la planilla, los marca CONVOCADOS con sus goles/tarjetas,
-      // marca como BAJA a los que no aparecen, y carga marcador + árbitros.
+      // ─── Import de planilla AAHBA (flujo 2 pasadas) ──────────────────────
+      // Pasada 1: parsea, detecta nuevas → muestra confirmación
+      // Pasada 2: aplica (creando nuevas o no según la elección)
       const handleImportPlanilla = async (text) => {
         setImporting(true);
         setImportMsg("");
@@ -7154,97 +7355,64 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             return;
           }
 
-          // ¿Cuál equipo es el nuestro? Detectamos por match de carnets
-          const nameNorm = s => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-          const matchCount = (jugs) => {
-            const carnetSet = new Set(jugadores.map(j => j.carnet_aahba).filter(Boolean));
-            return jugs.filter(j => carnetSet.has(j.carnet)).length;
-          };
-          const localMatches = matchCount(parsed.equipoLocal.jugadores);
-          const visitanteMatches = matchCount(parsed.equipoVisitante.jugadores);
-
-          let miEquipo, equipoRival;
-          if (localMatches >= visitanteMatches && localMatches > 0) {
-            miEquipo = parsed.equipoLocal;
-            equipoRival = parsed.equipoVisitante;
-          } else if (visitanteMatches > 0) {
-            miEquipo = parsed.equipoVisitante;
-            equipoRival = parsed.equipoLocal;
-          } else {
-            // No detectamos match → preguntar al usuario
+          // Detectar mi equipo
+          let pick = pickMiEquipo(parsed, jugadores);
+          if (!pick) {
             const choice = prompt(
               `No pude detectar cuál es tu equipo. Tipeá:\n  L  → si tu equipo es ${parsed.equipoLocal.nombre}\n  V  → si tu equipo es ${parsed.equipoVisitante.nombre}`,
               ""
             );
             if (!choice) { setImporting(false); return; }
-            if (choice.toUpperCase().startsWith("L")) {
-              miEquipo = parsed.equipoLocal;
-              equipoRival = parsed.equipoVisitante;
-            } else {
-              miEquipo = parsed.equipoVisitante;
-              equipoRival = parsed.equipoLocal;
-            }
+            pick = choice.toUpperCase().startsWith("L")
+              ? { miEquipo: parsed.equipoLocal, equipoRival: parsed.equipoVisitante }
+              : { miEquipo: parsed.equipoVisitante, equipoRival: parsed.equipoLocal };
           }
 
-          // Para cada jugador de la planilla, encontrar el del plantel (por carnet o nombre)
-          const matchedIds = new Set();
-          let convocadosCount = 0;
-          let golesCargados = 0;
-          let tarjetasCargadas = 0;
+          // Detectar jugadoras nuevas
+          const nuevas = detectarNuevasJugadoras(pick.miEquipo, jugadores);
 
-          for (const pJ of miEquipo.jugadores) {
-            // Match por carnet primero, luego por nombre normalizado
-            let jugador = pJ.carnet ? jugadores.find(j => j.carnet_aahba === pJ.carnet) : null;
-            if (!jugador) {
-              jugador = jugadores.find(j => nameNorm(j.nombre) === nameNorm(pJ.nombre));
-            }
-            if (!jugador) continue; // no está en el plantel, ignorar
-            matchedIds.add(jugador.id);
-            convocadosCount++;
-            if (pJ.goles > 0) golesCargados += pJ.goles;
-            if (pJ.tarjetaVerde || pJ.tarjetaAmarilla > 0 || pJ.tarjetaRoja) tarjetasCargadas++;
-
-            await onUpdate(jugador.id, {
-              status: "convocado",
-              motivo: null,
-              goles: pJ.goles,
-              tarjeta_verde: pJ.tarjetaVerde,
-              tarjeta_amarilla: pJ.tarjetaAmarilla,
-              tarjeta_roja: pJ.tarjetaRoja,
-            });
+          if (nuevas.length > 0) {
+            // Mostrar modal de confirmación y pausar
+            setPendingImport({ parsed, ...pick, nuevas });
+            setImporting(false);
+            return;
           }
 
-          // Marcar como BAJA a los del plantel que NO aparecen en la planilla
-          let bajasCount = 0;
-          const activos = jugadores.filter(j => !j.estado || j.estado === "activo");
-          for (const j of activos) {
-            if (matchedIds.has(j.id)) continue;
-            await onUpdate(j.id, { status: "baja", motivo: "deportivo" });
-            bajasCount++;
-          }
-
-          // Guardar marcador + árbitros en la fecha
-          const updates = {};
-          if (miEquipo.golesEquipo != null) updates.goles_propio = miEquipo.golesEquipo;
-          if (equipoRival.golesEquipo != null) updates.goles_rival = equipoRival.golesEquipo;
-          if (parsed.arbitros) updates.arbitros = parsed.arbitros;
-          updates.result_cargado = true;
-          await sb.from("fechas").update(updates).eq("id", fecha.id);
-
-          // Actualizar estados locales para que la UI se sincronice
-          if (updates.goles_propio != null) setGolesPropio(updates.goles_propio.toString());
-          if (updates.goles_rival != null) setGolesRival(updates.goles_rival.toString());
-          if (updates.arbitros) setArbitros(updates.arbitros);
-          setResultCargado(true);
-
-          setImportMsg(`✓ Importados ${convocadosCount} convocados, ${bajasCount} bajas, ${golesCargados} goles, ${tarjetasCargadas} con tarjeta. Marcador: ${miEquipo.golesEquipo ?? "?"}–${equipoRival.golesEquipo ?? "?"}.`);
-          setShowImporter(false);
-          setPasteText("");
-
-          // Refrescar todos los datos del padre
-          if (reload) await reload();
+          // Sin nuevas → aplicar directo
+          await aplicarImport(parsed, pick.miEquipo, pick.equipoRival, false, []);
         } catch (e) {
           alert("Error procesando la planilla: " + e.message);
+          setImporting(false);
+        }
+      };
+
+      // Aplica el import (después de resolver el tema de las nuevas)
+      const aplicarImport = async (parsed, miEquipo, equipoRival, agregarNuevas, nuevas) => {
+        setImporting(true);
+        try {
+          let jugadoresUpd = jugadores;
+          if (agregarNuevas && nuevas.length > 0) {
+            const creadas = await crearJugadorasNuevas(nuevas, club.id);
+            jugadoresUpd = [...jugadores, ...creadas];
+          }
+
+          const r = await applyPlanillaAFecha(parsed, fecha, jugadoresUpd, miEquipo, equipoRival);
+
+          // Actualizar estados locales para que la UI se sincronice
+          if (miEquipo.golesEquipo != null) setGolesPropio(miEquipo.golesEquipo.toString());
+          if (equipoRival.golesEquipo != null) setGolesRival(equipoRival.golesEquipo.toString());
+          if (parsed.arbitros) setArbitros(parsed.arbitros);
+          setResultCargado(true);
+
+          const nuevasMsg = agregarNuevas && nuevas.length > 0 ? ` ${nuevas.length} jugadora${nuevas.length !== 1 ? "s" : ""} nueva${nuevas.length !== 1 ? "s" : ""} agregada${nuevas.length !== 1 ? "s" : ""} al plantel.` : "";
+          setImportMsg(`✓ ${r.convocados} convocadas, ${r.bajas} bajas, ${r.goles} gol${r.goles !== 1 ? "es" : ""}, ${r.tarjetas} con tarjeta. Marcador: ${r.marker}.${nuevasMsg}`);
+          setShowImporter(false);
+          setPasteText("");
+          setPendingImport(null);
+
+          if (reload) await reload();
+        } catch (e) {
+          alert("Error aplicando la planilla: " + e.message);
         }
         setImporting(false);
       };
@@ -7271,6 +7439,48 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // Bloque del import (siempre arriba)
       const importerBlock = (
         <div style={{marginBottom:14, padding:12, background:"var(--plat-soft)", border:"1px solid var(--plat-border)", borderRadius:6}}>
+          {/* Modal interno de confirmación de jugadoras nuevas */}
+          {pendingImport && (
+            <div style={{padding:14, background:"rgba(240,208,80,0.10)", border:"1px solid rgba(240,208,80,0.4)", borderRadius:6, marginBottom:10}}>
+              <div style={{fontSize:12, fontWeight:700, color:"var(--gold)", marginBottom:6}}>
+                👀 Detecté {pendingImport.nuevas.length} jugadora{pendingImport.nuevas.length !== 1 ? "s" : ""} nueva{pendingImport.nuevas.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:10, lineHeight:1.5}}>
+                Aparecen en la planilla pero <strong>no están en el plantel</strong>. Si las agregás, se van a crear como activas.
+              </div>
+              <div style={{maxHeight:180, overflowY:"auto", background:"rgba(0,0,0,0.25)", borderRadius:4, padding:6, marginBottom:10}}>
+                {pendingImport.nuevas
+                  .sort((a, b) => (a.numero || 999) - (b.numero || 999))
+                  .map((n, i) => (
+                  <div key={i} style={{padding:"4px 8px", fontSize:11, color:"var(--white-soft)", display:"flex", alignItems:"center", gap:8, borderBottom: i < pendingImport.nuevas.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"}}>
+                    <span style={{minWidth:22, fontFamily:"var(--mono)", color:"var(--gold)", fontWeight:700, textAlign:"center"}}>
+                      #{n.numero ?? "?"}
+                    </span>
+                    <span style={{flex:1, fontWeight:600}}>{n.nombre}</span>
+                    {n.carnet && <span style={{fontSize:10, color:"var(--white-dim)", fontFamily:"var(--mono)"}}>{n.carnet}</span>}
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex", gap:8}}>
+                <button onClick={() => {
+                  // Ignorar nuevas: aplicar sin crearlas
+                  aplicarImport(pendingImport.parsed, pendingImport.miEquipo, pendingImport.equipoRival, false, []);
+                }} disabled={importing} style={{...btnGhost, flex:1, fontSize:11}}>
+                  ✗ Ignorarlas
+                </button>
+                <button onClick={() => {
+                  // Agregar nuevas + aplicar
+                  aplicarImport(pendingImport.parsed, pendingImport.miEquipo, pendingImport.equipoRival, true, pendingImport.nuevas);
+                }} disabled={importing} style={{...btnPrimary, flex:2, fontSize:11}}>
+                  {importing ? "Procesando..." : "✓ Agregar al plantel y procesar"}
+                </button>
+              </div>
+              <button onClick={() => { setPendingImport(null); setImporting(false); }} disabled={importing} style={{...btnGhost, width:"100%", marginTop:6, fontSize:10}}>
+                Cancelar
+              </button>
+            </div>
+          )}
+
           {!showImporter ? (
             <>
               <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:10}}>
