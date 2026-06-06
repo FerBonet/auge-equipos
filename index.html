@@ -7355,10 +7355,12 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         // Estado inicial desde la formación inicial guardada
         const formacionActual = {};
         const minutosJugados = {};
+        const tiempoSinCambio = {}; // segs desde el último cambio de estado del jugador
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
           if (r?.status === "convocado") {
             minutosJugados[j.id] = 0;
+            tiempoSinCambio[j.id] = 0;
             if (r.es_titular === true && r.field_pos) {
               formacionActual[j.id] = r.field_pos;
             }
@@ -7371,6 +7373,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           lastTickAt: null,
           formacionActual,
           minutosJugados,
+          tiempoSinCambio,
           cambios: [],
         };
       };
@@ -7396,10 +7399,16 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         const interval = setInterval(() => {
           setState(s => {
             const newSegundos = s.segundosCuarto + 1;
-            // Sumar 1 segundo a todos los que están en cancha
+            // Sumar 1 segundo a los que están en cancha (tiempo neto)
             const newMinutos = { ...s.minutosJugados };
             for (const jId of Object.keys(s.formacionActual)) {
               newMinutos[jId] = (newMinutos[jId] || 0) + 1;
+            }
+            // Sumar 1 segundo al "tiempo desde último cambio" de TODOS los convocados
+            // (tanto los que están en cancha como los suplentes)
+            const newSinCambio = { ...s.tiempoSinCambio };
+            for (const jId of Object.keys(s.minutosJugados)) {
+              newSinCambio[jId] = (newSinCambio[jId] || 0) + 1;
             }
             // Si llegamos a 15 min, pausar automáticamente (parpadeo visual)
             const llegoAlFinal = newSegundos >= CUARTO_DURACION;
@@ -7407,6 +7416,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               ...s,
               segundosCuarto: newSegundos,
               minutosJugados: newMinutos,
+              tiempoSinCambio: newSinCambio,
               isRunning: llegoAlFinal ? false : true,
             };
           });
@@ -7442,11 +7452,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       });
 
       // ─── Posiciones SVG ───────────────────────────────────────────────────
-      const W = 320, H = 580;
+      const W = 360, H = 700;
       const pad = 14;
       const fw = W - pad * 2;
-      const fh = 460;
-      const SUB_ZONE_Y = fh + 30;
+      const fh = 510;
+      const SUB_ZONE_Y = fh + 35;
 
       // Coordenadas (en px del SVG) para un jugador
       const pxOfJugador = (jugador) => {
@@ -7467,7 +7477,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         const cellW = fw / colCount;
         return {
           x: pad + col * cellW + cellW / 2,
-          y: SUB_ZONE_Y + 22 + row * 56,
+          y: SUB_ZONE_Y + 26 + row * 70,
         };
       };
 
@@ -7548,6 +7558,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const minutoActual = Math.floor(s.segundosCuarto / 60);
           const newFormacion = { ...s.formacionActual };
           const newMinutos = { ...s.minutosJugados };
+          const newSinCambio = { ...s.tiempoSinCambio };
           const newCambios = [...s.cambios];
           for (const c of cambiosPendientes) {
             const fieldPos = newFormacion[c.sale_id];
@@ -7555,6 +7566,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             newFormacion[c.entra_id] = fieldPos; // el que entra ocupa la posición
             // Si la que entra todavía no tenía minutos, inicializarla
             if (newMinutos[c.entra_id] == null) newMinutos[c.entra_id] = 0;
+            // RESETEAR el tiempo "sin cambio" de ambos jugadores involucrados
+            newSinCambio[c.sale_id] = 0;
+            newSinCambio[c.entra_id] = 0;
             newCambios.push({
               cuarto: s.cuarto,
               minuto_cuarto: minutoActual,
@@ -7567,6 +7581,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             ...s,
             formacionActual: newFormacion,
             minutosJugados: newMinutos,
+            tiempoSinCambio: newSinCambio,
             cambios: newCambios,
           };
         });
@@ -7676,10 +7691,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           }
         }
 
-        const r = isInCancha ? 18 : 15;
-        const hitR = 26;
+        const r = isInCancha ? 21 : 18;
+        const hitR = 30;
         const apellido = (jugador.nombre || "").split(",")[0].split(" ")[0].slice(0, 10);
-        const minutos = Math.round((state.minutosJugados[jugador.id] || 0) / 60);
+        // Dos relojes: tiempo sin cambio + tiempo neto en cancha
+        const segSinCambio = state.tiempoSinCambio?.[jugador.id] ?? 0;
+        const segEnCancha = state.minutosJugados[jugador.id] ?? 0;
+        const tiempoDoble = `${fmtTime(segSinCambio)}(${fmtTime(segEnCancha)})`;
 
         return (
           <g key={jugador.id}
@@ -7701,23 +7719,23 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               strokeWidth={isPendienteSale || isPendienteEntra ? 3 : 2}
               style={{filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.6))" : "none"}}
               pointerEvents="none"/>
-            <text x={pos.x} y={pos.y + 5} textAnchor="middle"
-              fontSize={isInCancha ? 14 : 12} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
+            <text x={pos.x} y={pos.y + 6} textAnchor="middle"
+              fontSize={isInCancha ? 17 : 14} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
               {jugador.numero ?? "?"}
             </text>
-            {/* Apellido + minutos (solo si no está siendo arrastrado) */}
+            {/* Apellido + relojes dobles (siempre, en cancha o suplente) */}
             {!isDragging && (
               <>
-                <text x={pos.x} y={pos.y + r + 11} textAnchor="middle"
-                  fontSize={9} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
+                <text x={pos.x} y={pos.y + r + 12} textAnchor="middle"
+                  fontSize={10} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
                   {apellido.toUpperCase()}
                 </text>
-                {isInCancha && (
-                  <text x={pos.x} y={pos.y + r + 22} textAnchor="middle"
-                    fontSize={8} fontWeight={700} fill={club.theme_primary || "var(--plat)"} fontFamily="var(--mono)" pointerEvents="none">
-                    {minutos}'
-                  </text>
-                )}
+                <text x={pos.x} y={pos.y + r + 24} textAnchor="middle"
+                  fontSize={9} fontWeight={700}
+                  fill={isInCancha ? (club.theme_primary || "var(--plat)") : "var(--white-dim)"}
+                  fontFamily="var(--mono)" pointerEvents="none">
+                  {tiempoDoble}
+                </text>
               </>
             )}
           </g>
