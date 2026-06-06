@@ -2103,23 +2103,29 @@
         const isSub = !posKey || posKey === "SUB";
         const pos = isDragging ? { x: dragging.x, y: dragging.y } : pxOf(jugador);
         const fillColor = isSub ? "var(--red)" : (isGK ? "var(--gold)" : themeColor);
-        const r = 14;
+        // Fichas titulares más grandes que suplentes (para mobile más fácil de agarrar)
+        const r = isSub ? 16 : 19;
+        const hitR = 28; // zona invisible de touch/click (más grande para móvil)
         const apellido = (jugador.nombre || "").split(",")[0].split(" ")[0].slice(0, 10);
         return (
           <g key={jugador.id} style={{cursor: isDragging ? "grabbing" : "grab", touchAction:"none"}}
              onMouseDown={handlePointerDown(jugador)}
              onTouchStart={handlePointerDown(jugador)}
              opacity={isDragging ? 0.85 : 1}>
+            {/* Zona invisible de hit (más grande que la ficha visual) */}
+            <circle cx={pos.x} cy={pos.y} r={hitR} fill="transparent" pointerEvents="all"/>
+            {/* Ficha visible */}
             <circle cx={pos.x} cy={pos.y} r={r}
               fill={fillColor} stroke="var(--bg)" strokeWidth={2}
-              style={{filter: isDragging ? "drop-shadow(0 4px 8px rgba(0,0,0,0.5))" : "none"}}/>
-            <text x={pos.x} y={pos.y + 4} textAnchor="middle"
-              fontSize={12} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
+              style={{filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.6))" : "none"}}
+              pointerEvents="none"/>
+            <text x={pos.x} y={pos.y + 5} textAnchor="middle"
+              fontSize={isSub ? 13 : 15} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
               {jugador.numero ?? "?"}
             </text>
             {!isDragging && (
               <text x={pos.x} y={pos.y + r + 11} textAnchor="middle"
-                fontSize={8} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
+                fontSize={9} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
                 {apellido.toUpperCase()}
               </text>
             )}
@@ -2181,20 +2187,30 @@
               stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
 
             {/* Posiciones fantasma (círculos grises punteados) */}
-            {Object.entries(positions).map(([key, p]) => {
-              const cx = pad + (p.x / 100) * fw;
-              const cy = pad + (p.y / 100) * fh;
-              return (
-                <g key={key}>
-                  <circle cx={cx} cy={cy} r={15}
-                    fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="2 3"/>
-                  <text x={cx} y={cy + 4} textAnchor="middle"
-                    fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.25)" fontFamily="var(--mono)" pointerEvents="none">
-                    {key}
-                  </text>
-                </g>
-              );
-            })}
+            {(() => {
+              // Si estoy arrastrando algo, calcular cuál es la posición más cercana para resaltarla
+              const highlightedPos = dragging ? closestPosition(dragging.x, dragging.y) : null;
+              return Object.entries(positions).map(([key, p]) => {
+                const cx = pad + (p.x / 100) * fw;
+                const cy = pad + (p.y / 100) * fh;
+                const isHighlight = key === highlightedPos;
+                return (
+                  <g key={key}>
+                    <circle cx={cx} cy={cy} r={22}
+                      fill={isHighlight ? `${themeColor}26` : "none"}
+                      stroke={isHighlight ? themeColor : "rgba(255,255,255,0.15)"}
+                      strokeWidth={isHighlight ? 2 : 1}
+                      strokeDasharray={isHighlight ? "0" : "3 3"}/>
+                    <text x={cx} y={cy + 4} textAnchor="middle"
+                      fontSize={9} fontWeight={700}
+                      fill={isHighlight ? themeColor : "rgba(255,255,255,0.30)"}
+                      fontFamily="var(--mono)" pointerEvents="none">
+                      {key}
+                    </text>
+                  </g>
+                );
+              });
+            })()}
 
             {/* Línea divisoria: zona de suplentes */}
             <line x1={0} y1={SUB_ZONE_Y} x2={W} y2={SUB_ZONE_Y} stroke="rgba(255,255,255,0.20)" strokeWidth={1} strokeDasharray="3 3"/>
@@ -6991,14 +7007,15 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           )}
 
           {/* Tabs */}
-          <div style={{display:"flex", gap:4, marginBottom:14}}>
+          <div style={{display:"flex", gap:4, marginBottom:14, flexWrap:"wrap"}}>
             {[
               { id:"convocatoria", icon:"📋", label:"CONVOCATORIA" },
               { id:"formacion",    icon:"🏑", label:"FORMACIÓN" },
+              { id:"vivo",         icon:"🎮", label:"VIVO" },
               { id:"resultado",    icon:"🏆", label:"RESULTADO" },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
-                flex:1, padding:"11px 8px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+                flex:1, minWidth:"22%", padding:"11px 6px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
                 border: tab === t.id ? `1px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.08)",
                 background: tab === t.id ? `${club.theme_primary}1F` : "transparent",
                 color: tab === t.id ? club.theme_primary : "var(--white-dim)", borderRadius:6
@@ -7027,6 +7044,14 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               onFormacionChange={handleFormacion}
               savingFormacion={savingFormacion}
               onUpdate={updateJugador}
+            />
+          ) : tab === "vivo" ? (
+            <VivoTabContent
+              fecha={fecha}
+              club={club}
+              jugadores={jugadoresActivos}
+              convRows={convRows}
+              reload={load}
             />
           ) : (
             <ResultadoTabContent
@@ -7297,6 +7322,614 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     }
 
     // ─── Tab Resultado: editar goles, goleadores, tarjetas, árbitros ──────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  TAB VIVO · Gestión de cambios en vivo durante un partido
+    //  - Reloj de 4 cuartos de 15 min cada uno
+    //  - Drag de suplente → titular = marcar cambio pendiente (línea uniendo)
+    //  - Confirmar cambios → animación → guardar en localStorage
+    //  - Al final, "Finalizar partido" vuelca todo a Supabase
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Helper: clave de localStorage por fecha
+    const vivoKey = fechaId => `vivo_${fechaId}`;
+    const CUARTO_DURACION = 15 * 60; // 15 min en segundos
+
+    function VivoTabContent({ fecha, club, jugadores, convRows, reload }) {
+      const positions = getFormationPositions(fecha.formacion || "4-3-3");
+
+      // ─── Estado persistente en localStorage ───────────────────────────────
+      // Estructura: {
+      //   cuarto: 1-4,
+      //   segundosCuarto: 0-900,
+      //   isRunning: bool,
+      //   lastTickAt: timestamp (cuando se inició el último tramo)
+      //   formacionActual: { jugador_id: field_pos } (mapa actual)
+      //   minutosJugados: { jugador_id: segundos }
+      //   cambios: [{ cuarto, minuto_cuarto, sale_id, entra_id, field_pos }]
+      // }
+      const loadState = () => {
+        try {
+          const raw = localStorage.getItem(vivoKey(fecha.id));
+          if (raw) return JSON.parse(raw);
+        } catch (e) {}
+        // Estado inicial desde la formación inicial guardada
+        const formacionActual = {};
+        const minutosJugados = {};
+        for (const j of jugadores) {
+          const r = convRows.find(x => x.jugador_id === j.id);
+          if (r?.status === "convocado") {
+            minutosJugados[j.id] = 0;
+            if (r.es_titular === true && r.field_pos) {
+              formacionActual[j.id] = r.field_pos;
+            }
+          }
+        }
+        return {
+          cuarto: 1,
+          segundosCuarto: 0,
+          isRunning: false,
+          lastTickAt: null,
+          formacionActual,
+          minutosJugados,
+          cambios: [],
+        };
+      };
+
+      const [state, setState] = useState(loadState);
+      const [cambiosPendientes, setCambiosPendientes] = useState([]); // [{ sale_id, entra_id }]
+      const [draggingId, setDraggingId] = useState(null); // jugador que estoy arrastrando
+      const [dragPos, setDragPos] = useState(null); // { x, y } posición actual del drag
+      const [animating, setAnimating] = useState(false); // mientras se ejecuta la animación de cambio
+      const [finalizando, setFinalizando] = useState(false);
+      const svgRef = useRef(null);
+
+      // ─── Persistir estado en localStorage cada vez que cambia ─────────────
+      useEffect(() => {
+        try {
+          localStorage.setItem(vivoKey(fecha.id), JSON.stringify(state));
+        } catch (e) {}
+      }, [state, fecha.id]);
+
+      // ─── Reloj: tick cada 1 segundo cuando isRunning ──────────────────────
+      useEffect(() => {
+        if (!state.isRunning) return;
+        const interval = setInterval(() => {
+          setState(s => {
+            const newSegundos = s.segundosCuarto + 1;
+            // Sumar 1 segundo a todos los que están en cancha
+            const newMinutos = { ...s.minutosJugados };
+            for (const jId of Object.keys(s.formacionActual)) {
+              newMinutos[jId] = (newMinutos[jId] || 0) + 1;
+            }
+            // Si llegamos a 15 min, pausar automáticamente (parpadeo visual)
+            const llegoAlFinal = newSegundos >= CUARTO_DURACION;
+            return {
+              ...s,
+              segundosCuarto: newSegundos,
+              minutosJugados: newMinutos,
+              isRunning: llegoAlFinal ? false : true,
+            };
+          });
+        }, 1000);
+        return () => clearInterval(interval);
+      }, [state.isRunning, state.cuarto]);
+
+      // ─── Helpers de reloj ─────────────────────────────────────────────────
+      const fmtTime = (segs) => {
+        const mm = Math.floor(segs / 60);
+        const ss = segs % 60;
+        return `${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}`;
+      };
+
+      const togglePlay = () => setState(s => ({ ...s, isRunning: !s.isRunning }));
+
+      const siguienteCuarto = () => {
+        if (state.cuarto >= 4) return;
+        if (!confirm(`¿Pasar al cuarto ${state.cuarto + 1}? El reloj vuelve a 0:00.`)) return;
+        setState(s => ({ ...s, cuarto: s.cuarto + 1, segundosCuarto: 0, isRunning: false }));
+      };
+
+      const resetReloj = () => {
+        if (!confirm("¿Resetear el reloj a 0:00 (sin perder cambios)?")) return;
+        setState(s => ({ ...s, segundosCuarto: 0, isRunning: false }));
+      };
+
+      // ─── Lista de jugadores en cancha y disponibles para entrar ───────────
+      const enCancha = jugadores.filter(j => state.formacionActual[j.id]); // tiene posición en cancha
+      const disponibles = jugadores.filter(j => {
+        const r = convRows.find(x => x.jugador_id === j.id);
+        return r?.status === "convocado" && !state.formacionActual[j.id]; // convocado pero no en cancha
+      });
+
+      // ─── Posiciones SVG ───────────────────────────────────────────────────
+      const W = 320, H = 580;
+      const pad = 14;
+      const fw = W - pad * 2;
+      const fh = 460;
+      const SUB_ZONE_Y = fh + 30;
+
+      // Coordenadas (en px del SVG) para un jugador
+      const pxOfJugador = (jugador) => {
+        const fp = state.formacionActual[jugador.id];
+        if (fp && positions[fp]) {
+          const p = positions[fp];
+          return {
+            x: pad + (p.x / 100) * fw,
+            y: pad + (p.y / 100) * fh,
+          };
+        }
+        // Suplente
+        const idx = disponibles.findIndex(s => s.id === jugador.id);
+        if (idx < 0) return null;
+        const colCount = Math.max(4, Math.ceil(disponibles.length / 2));
+        const col = idx % colCount;
+        const row = Math.floor(idx / colCount);
+        const cellW = fw / colCount;
+        return {
+          x: pad + col * cellW + cellW / 2,
+          y: SUB_ZONE_Y + 22 + row * 56,
+        };
+      };
+
+      // ─── DRAG: arrastrar un suplente sobre un titular para marcar cambio ──
+      const getEventPoint = (e) => {
+        const svg = svgRef.current;
+        if (!svg) return { x: 0, y: 0 };
+        const rect = svg.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+          x: ((clientX - rect.left) / rect.width) * W,
+          y: ((clientY - rect.top) / rect.height) * H,
+        };
+      };
+
+      const handleDragStart = (jugador) => (e) => {
+        if (animating) return;
+        // Solo se pueden arrastrar los disponibles (suplentes)
+        if (state.formacionActual[jugador.id]) return;
+        // Tampoco si ya tiene un cambio pendiente
+        if (cambiosPendientes.some(c => c.entra_id === jugador.id)) return;
+        e.preventDefault();
+        const p = getEventPoint(e);
+        setDraggingId(jugador.id);
+        setDragPos(p);
+      };
+
+      useEffect(() => {
+        if (!draggingId) return;
+        const move = (e) => {
+          const p = getEventPoint(e);
+          setDragPos(p);
+          if (e.cancelable) e.preventDefault();
+        };
+        const up = () => {
+          // Detectar si soltó sobre un titular
+          if (!dragPos) { setDraggingId(null); return; }
+          // Encontrar el titular más cercano (dentro de un radio)
+          let masCercano = null;
+          let bestDist = 35; // tolerancia generosa
+          for (const t of enCancha) {
+            // Si ese titular ya tiene un cambio pendiente, no se puede
+            if (cambiosPendientes.some(c => c.sale_id === t.id)) continue;
+            const pt = pxOfJugador(t);
+            if (!pt) continue;
+            const d = Math.hypot(pt.x - dragPos.x, pt.y - dragPos.y);
+            if (d < bestDist) { bestDist = d; masCercano = t; }
+          }
+          if (masCercano) {
+            // Agregar cambio pendiente
+            setCambiosPendientes(prev => [...prev, { sale_id: masCercano.id, entra_id: draggingId }]);
+          }
+          setDraggingId(null);
+          setDragPos(null);
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("touchmove", move, { passive: false });
+        window.addEventListener("mouseup", up);
+        window.addEventListener("touchend", up);
+        return () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("touchmove", move);
+          window.removeEventListener("mouseup", up);
+          window.removeEventListener("touchend", up);
+        };
+      }, [draggingId, dragPos, enCancha, cambiosPendientes]);
+
+      // ─── Confirmar cambios pendientes ─────────────────────────────────────
+      const confirmarCambios = async () => {
+        if (cambiosPendientes.length === 0) return;
+        setAnimating(true);
+        // Esperar animación CSS de 700ms
+        await new Promise(r => setTimeout(r, 800));
+
+        // Aplicar los cambios al estado
+        setState(s => {
+          const minutoActual = Math.floor(s.segundosCuarto / 60);
+          const newFormacion = { ...s.formacionActual };
+          const newMinutos = { ...s.minutosJugados };
+          const newCambios = [...s.cambios];
+          for (const c of cambiosPendientes) {
+            const fieldPos = newFormacion[c.sale_id];
+            delete newFormacion[c.sale_id]; // el que sale ya no está en cancha
+            newFormacion[c.entra_id] = fieldPos; // el que entra ocupa la posición
+            // Si la que entra todavía no tenía minutos, inicializarla
+            if (newMinutos[c.entra_id] == null) newMinutos[c.entra_id] = 0;
+            newCambios.push({
+              cuarto: s.cuarto,
+              minuto_cuarto: minutoActual,
+              sale_id: c.sale_id,
+              entra_id: c.entra_id,
+              field_pos: fieldPos,
+            });
+          }
+          return {
+            ...s,
+            formacionActual: newFormacion,
+            minutosJugados: newMinutos,
+            cambios: newCambios,
+          };
+        });
+        setCambiosPendientes([]);
+        setAnimating(false);
+      };
+
+      const cancelarPendientes = () => {
+        if (cambiosPendientes.length === 0) return;
+        if (confirm(`¿Cancelar los ${cambiosPendientes.length} cambio${cambiosPendientes.length > 1 ? "s" : ""} pendiente${cambiosPendientes.length > 1 ? "s" : ""}?`)) {
+          setCambiosPendientes([]);
+        }
+      };
+
+      // ─── Finalizar partido: volcar todo a DB ──────────────────────────────
+      const finalizarPartido = async () => {
+        if (!confirm(
+          `¿Finalizar el partido y guardar todo en la base de datos?\n\n` +
+          `Cambios registrados: ${state.cambios.length}\n` +
+          `Jugadoras que jugaron: ${Object.keys(state.minutosJugados).filter(k => state.minutosJugados[k] > 0).length}\n\n` +
+          `Esta acción NO se puede deshacer.`
+        )) return;
+        setFinalizando(true);
+        try {
+          // 1. Insertar cambios
+          if (state.cambios.length > 0) {
+            const payload = state.cambios.map(c => ({
+              fecha_id: fecha.id,
+              cuarto: c.cuarto,
+              minuto_cuarto: c.minuto_cuarto,
+              sale_jugador_id: c.sale_id,
+              entra_jugador_id: c.entra_id,
+              field_pos: c.field_pos,
+            }));
+            const { error } = await sb.from("cambios").insert(payload);
+            if (error) throw error;
+          }
+          // 2. Update de minutos_jugados y entro_cuarto en fecha_jugadores
+          for (const jId of Object.keys(state.minutosJugados)) {
+            const minutos = Math.round(state.minutosJugados[jId] / 60);
+            // Calcular en qué cuarto entró por primera vez
+            const r = convRows.find(x => x.jugador_id === jId);
+            let entroCuarto = null;
+            // Si era titular original, entró en 1
+            if (r?.es_titular === true) entroCuarto = 1;
+            else {
+              const primerCambio = state.cambios.find(c => c.entra_id === jId);
+              if (primerCambio) entroCuarto = primerCambio.cuarto;
+            }
+            await sb.from("fecha_jugadores")
+              .update({ minutos_jugados: minutos, entro_cuarto: entroCuarto })
+              .eq("fecha_id", fecha.id)
+              .eq("jugador_id", jId);
+          }
+          // 3. Limpiar localStorage
+          localStorage.removeItem(vivoKey(fecha.id));
+          alert("✓ Partido finalizado. Datos guardados en la base de datos.");
+          if (reload) await reload();
+        } catch (e) {
+          alert("Error al finalizar: " + e.message);
+        }
+        setFinalizando(false);
+      };
+
+      const resetTodo = () => {
+        if (!confirm("¿Borrar TODO lo cargado en este partido (cambios, minutos, reloj)? Esto vuelve al estado inicial desde la formación inicial.")) return;
+        localStorage.removeItem(vivoKey(fecha.id));
+        setState(loadState());
+        setCambiosPendientes([]);
+      };
+
+      // ─── Render de una ficha en SVG ───────────────────────────────────────
+      const renderFicha = (jugador, isInCancha) => {
+        const isDragging = draggingId === jugador.id;
+        const isPendienteSale = cambiosPendientes.some(c => c.sale_id === jugador.id);
+        const isPendienteEntra = cambiosPendientes.some(c => c.entra_id === jugador.id);
+        const isAnimating = animating && (isPendienteSale || isPendienteEntra);
+
+        let basePos = pxOfJugador(jugador);
+        if (!basePos) return null;
+        const pos = isDragging && dragPos ? dragPos : basePos;
+
+        // Color de la ficha
+        const fp = state.formacionActual[jugador.id];
+        const isGK = fp === "GK";
+        let fillColor;
+        if (isInCancha) {
+          fillColor = isGK ? "var(--gold)" : (club.theme_primary || "var(--plat)");
+        } else {
+          fillColor = "var(--red)";
+        }
+
+        // Para la animación: la ficha "viaja" hacia su nueva posición
+        let animTransform = "";
+        if (isAnimating) {
+          // Calcular destino: si sale → va al lugar del que entra, si entra → va al lugar del que sale
+          const cambio = cambiosPendientes.find(c => c.sale_id === jugador.id || c.entra_id === jugador.id);
+          if (cambio) {
+            const otroId = cambio.sale_id === jugador.id ? cambio.entra_id : cambio.sale_id;
+            const otroJugador = jugadores.find(j => j.id === otroId);
+            const otroPos = otroJugador ? pxOfJugador(otroJugador) : null;
+            if (otroPos) {
+              const dx = otroPos.x - basePos.x;
+              const dy = otroPos.y - basePos.y;
+              animTransform = `translate(${dx}, ${dy})`;
+            }
+          }
+        }
+
+        const r = isInCancha ? 18 : 15;
+        const hitR = 26;
+        const apellido = (jugador.nombre || "").split(",")[0].split(" ")[0].slice(0, 10);
+        const minutos = Math.round((state.minutosJugados[jugador.id] || 0) / 60);
+
+        return (
+          <g key={jugador.id}
+             style={{
+               cursor: !isInCancha ? "grab" : "default",
+               touchAction:"none",
+               transform: animTransform,
+               transition: isAnimating ? "transform 0.7s cubic-bezier(.4,1.4,.6,1)" : "none",
+             }}
+             opacity={isDragging ? 0.85 : (isPendienteSale && !animating ? 0.6 : 1)}
+             onMouseDown={!isInCancha ? handleDragStart(jugador) : undefined}
+             onTouchStart={!isInCancha ? handleDragStart(jugador) : undefined}>
+            {/* Hit area invisible (más grande para mobile) */}
+            <circle cx={pos.x} cy={pos.y} r={hitR} fill="transparent" pointerEvents={isInCancha ? "none" : "all"}/>
+            {/* Ficha */}
+            <circle cx={pos.x} cy={pos.y} r={r}
+              fill={fillColor}
+              stroke={isPendienteSale ? "var(--orange)" : (isPendienteEntra ? "var(--orange)" : "var(--bg)")}
+              strokeWidth={isPendienteSale || isPendienteEntra ? 3 : 2}
+              style={{filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.6))" : "none"}}
+              pointerEvents="none"/>
+            <text x={pos.x} y={pos.y + 5} textAnchor="middle"
+              fontSize={isInCancha ? 14 : 12} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
+              {jugador.numero ?? "?"}
+            </text>
+            {/* Apellido + minutos (solo si no está siendo arrastrado) */}
+            {!isDragging && (
+              <>
+                <text x={pos.x} y={pos.y + r + 11} textAnchor="middle"
+                  fontSize={9} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
+                  {apellido.toUpperCase()}
+                </text>
+                {isInCancha && (
+                  <text x={pos.x} y={pos.y + r + 22} textAnchor="middle"
+                    fontSize={8} fontWeight={700} fill={club.theme_primary || "var(--plat)"} fontFamily="var(--mono)" pointerEvents="none">
+                    {minutos}'
+                  </text>
+                )}
+              </>
+            )}
+          </g>
+        );
+      };
+
+      // ─── Líneas de cambios pendientes ─────────────────────────────────────
+      const renderLineasCambio = () => {
+        return cambiosPendientes.map((c, idx) => {
+          const sale = jugadores.find(j => j.id === c.sale_id);
+          const entra = jugadores.find(j => j.id === c.entra_id);
+          if (!sale || !entra) return null;
+          const pSale = pxOfJugador(sale);
+          const pEntra = pxOfJugador(entra);
+          if (!pSale || !pEntra) return null;
+          return (
+            <g key={idx} opacity={animating ? 0 : 1} style={{transition: animating ? "opacity 0.3s" : "none"}}>
+              <line x1={pSale.x} y1={pSale.y} x2={pEntra.x} y2={pEntra.y}
+                stroke="var(--orange)" strokeWidth={2} strokeDasharray="5 3"
+                style={{
+                  animation: "dashFlow 1s linear infinite",
+                }}/>
+            </g>
+          );
+        });
+      };
+
+      // ─── Validaciones ─────────────────────────────────────────────────────
+      const minTotal = state.cuarto * CUARTO_DURACION - (CUARTO_DURACION - state.segundosCuarto);
+      const minutosTotalesPartido = Math.floor(minTotal / 60);
+      const tiempoFinalCuarto = state.segundosCuarto >= CUARTO_DURACION;
+      const cantConvocados = jugadores.filter(j => {
+        const r = convRows.find(x => x.jugador_id === j.id);
+        return r?.status === "convocado";
+      }).length;
+
+      if (cantConvocados === 0) {
+        return (
+          <div style={{padding:24, textAlign:"center", background:"rgba(255,255,255,0.02)", borderRadius:6, fontSize:12, color:"var(--white-dim)", lineHeight:1.5}}>
+            Primero hacé la convocatoria y armá la formación inicial.<br/>
+            Después acá vas a poder gestionar los cambios en vivo durante el partido.
+          </div>
+        );
+      }
+
+      return (
+        <div>
+          {/* ─── Estilos de animación del trazo ─── */}
+          <style>{`
+            @keyframes dashFlow {
+              to { stroke-dashoffset: -16; }
+            }
+            @keyframes pulseRed {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.4; }
+            }
+          `}</style>
+
+          {/* ─── RELOJ ARRIBA ─── */}
+          <div style={{
+            padding:14, background:"rgba(0,0,0,0.3)",
+            border:`2px solid ${tiempoFinalCuarto ? "var(--red)" : (state.isRunning ? "var(--green)" : "var(--white-dim)")}`,
+            borderRadius:8, marginBottom:14,
+            animation: tiempoFinalCuarto ? "pulseRed 0.8s infinite" : "none"
+          }}>
+            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10}}>
+              <div style={{fontSize:11, color:"var(--white-dim)", fontFamily:"var(--mono)", letterSpacing:2, fontWeight:700}}>
+                CUARTO
+              </div>
+              <div style={{display:"flex", gap:5}}>
+                {[1,2,3,4].map(c => (
+                  <button key={c} onClick={() => state.cuarto !== c && confirm(`¿Saltar al cuarto ${c}? El reloj vuelve a 0:00.`) && setState(s => ({...s, cuarto: c, segundosCuarto: 0, isRunning: false}))}
+                    style={{
+                      width:30, height:30, borderRadius:15, fontSize:13, fontWeight:900, fontFamily:"var(--mono)",
+                      border: state.cuarto === c ? `2px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.15)",
+                      background: state.cuarto === c ? `${club.theme_primary}33` : "transparent",
+                      color: state.cuarto === c ? club.theme_primary : "var(--white-dim)",
+                      cursor:"pointer"
+                    }}>{c}</button>
+                ))}
+              </div>
+            </div>
+            {/* Tiempo grande */}
+            <div style={{textAlign:"center", marginBottom:14}}>
+              <div style={{
+                fontSize:64, fontWeight:900, fontFamily:"var(--mono)",
+                color: tiempoFinalCuarto ? "var(--red)" : (state.isRunning ? "var(--green)" : "var(--white-soft)"),
+                lineHeight:1, letterSpacing:-2
+              }}>
+                {fmtTime(state.segundosCuarto)}
+              </div>
+              <div style={{fontSize:9, color:"var(--white-dim)", fontFamily:"var(--mono)", letterSpacing:2, marginTop:6}}>
+                {tiempoFinalCuarto ? "⚠️ FIN DEL CUARTO" : `RESTANTE: ${fmtTime(CUARTO_DURACION - state.segundosCuarto)}`}
+              </div>
+            </div>
+            {/* Controles */}
+            <div style={{display:"flex", gap:8}}>
+              <button onClick={togglePlay} disabled={tiempoFinalCuarto && state.cuarto >= 4} style={{
+                flex:2, padding:"12px", fontSize:13, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                background: state.isRunning ? "var(--orange)" : "var(--green)",
+                color: "var(--bg)", border:"none", borderRadius:6, cursor:"pointer",
+                opacity: tiempoFinalCuarto && state.cuarto >= 4 ? 0.4 : 1
+              }}>
+                {state.isRunning ? "⏸ PAUSAR" : "▶ JUGAR"}
+              </button>
+              {state.cuarto < 4 && (
+                <button onClick={siguienteCuarto} style={{
+                  flex:1, padding:"12px", fontSize:11, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                  background: "transparent", color:"var(--plat)", border:"1px solid var(--plat-border)", borderRadius:6, cursor:"pointer"
+                }}>
+                  Q{state.cuarto + 1} →
+                </button>
+              )}
+              <button onClick={resetReloj} style={{
+                padding:"12px", fontSize:11, fontWeight:700, fontFamily:"var(--mono)",
+                background:"transparent", color:"var(--white-dim)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:6, cursor:"pointer"
+              }}>↺</button>
+            </div>
+          </div>
+
+          {/* ─── Cambios pendientes (cartel + botón) ─── */}
+          {cambiosPendientes.length > 0 && (
+            <div style={{
+              padding:12, background:"rgba(255,140,0,0.10)", border:"1px solid var(--orange)", borderRadius:6, marginBottom:12,
+              display:"flex", alignItems:"center", gap:10
+            }}>
+              <div style={{flex:1, fontSize:12, color:"var(--white-soft)"}}>
+                <strong style={{color:"var(--orange)"}}>{cambiosPendientes.length} cambio{cambiosPendientes.length > 1 ? "s" : ""} pendiente{cambiosPendientes.length > 1 ? "s" : ""}</strong>
+                <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2}}>Las líneas naranjas muestran los cambios.</div>
+              </div>
+              <button onClick={cancelarPendientes} disabled={animating} style={{...btnGhost, padding:"6px 10px", fontSize:11}}>
+                ✗
+              </button>
+              <button onClick={confirmarCambios} disabled={animating} style={{
+                padding:"8px 14px", fontSize:11, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                background:"var(--orange)", color:"var(--bg)", border:"none", borderRadius:4, cursor:"pointer"
+              }}>
+                ✓ CONFIRMAR
+              </button>
+            </div>
+          )}
+
+          {/* ─── CANCHA SVG ─── */}
+          <div style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
+            <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:6, textAlign:"center", lineHeight:1.4}}>
+              <span style={{fontSize:14}}>🤚</span> Arrastrá un suplente (rojo) sobre un titular para marcar el cambio
+            </div>
+            <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
+              {/* Cancha */}
+              <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
+              <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
+              <line x1={pad} y1={pad + fh * 0.252} x2={pad + fw} y2={pad + fh * 0.252} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+              <line x1={pad} y1={pad + fh * 0.748} x2={pad + fw} y2={pad + fh * 0.748} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+              <path d={`M ${pad + fw/2 - 0.30*fw} ${pad + fh} A ${0.30*fw} ${0.16*fh} 0 0 1 ${pad + fw/2 + 0.30*fw} ${pad + fh}`}
+                fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
+              <path d={`M ${pad + fw/2 - 0.30*fw} ${pad} A ${0.30*fw} ${0.16*fh} 0 0 0 ${pad + fw/2 + 0.30*fw} ${pad}`}
+                fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
+              <line x1={pad + fw/2 - 0.06*fw} y1={pad + fh} x2={pad + fw/2 + 0.06*fw} y2={pad + fh} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
+              <line x1={pad + fw/2 - 0.06*fw} y1={pad} x2={pad + fw/2 + 0.06*fw} y2={pad} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
+
+              {/* Línea divisoria suplentes */}
+              <line x1={0} y1={SUB_ZONE_Y - 4} x2={W} y2={SUB_ZONE_Y - 4} stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="3 3"/>
+              <text x={W/2} y={SUB_ZONE_Y + 8} textAnchor="middle"
+                fontSize={9} fontWeight={700} fill="rgba(255,255,255,0.5)" fontFamily="var(--mono)" letterSpacing={2.5}>
+                SUPLENTES ({disponibles.length})
+              </text>
+
+              {/* Líneas de cambios pendientes */}
+              {renderLineasCambio()}
+
+              {/* Titulares */}
+              {enCancha.map(j => renderFicha(j, true))}
+              {/* Suplentes */}
+              {disponibles.map(j => renderFicha(j, false))}
+            </svg>
+          </div>
+
+          {/* ─── Resumen + Finalizar ─── */}
+          <div style={{padding:12, background:"rgba(255,255,255,0.02)", borderRadius:6, marginBottom:10}}>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontSize:11}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)"}}>{state.cambios.length}</div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>CAMBIOS</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18, fontWeight:900, color:"var(--green)", fontFamily:"var(--mono)"}}>
+                  {Object.keys(state.minutosJugados).filter(k => state.minutosJugados[k] > 0).length}
+                </div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>JUGARON</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                  {(state.cuarto - 1) * 15 + Math.floor(state.segundosCuarto / 60)}'
+                </div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>MIN TOTAL</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:"flex", gap:8}}>
+            <button onClick={resetTodo} style={{...btnGhost, flex:1, fontSize:11}}>↺ Resetear</button>
+            <button onClick={finalizarPartido} disabled={finalizando} style={{
+              flex:2, padding:"10px", fontSize:12, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1.5,
+              background:"var(--green)", color:"var(--bg)", border:"none", borderRadius:6, cursor:"pointer"
+            }}>
+              {finalizando ? "Guardando..." : "🏁 FINALIZAR PARTIDO"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     function ResultadoTabContent({ fecha, club, jugadores, convRows, onUpdate, reload }) {
       const [golesPropio, setGolesPropio] = useState(fecha.goles_propio ?? "");
       const [golesRival, setGolesRival] = useState(fecha.goles_rival ?? "");
