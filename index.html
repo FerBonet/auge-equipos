@@ -2775,14 +2775,15 @@
             <CounterBox value={counts.baja}       label="BAJAS"      color="var(--red)"/>
           </div>
 
-          {/* ── Tabs LISTA / CAMPO ────────────────────── */}
+          {/* ── Tabs LISTA / CAMPO / MINUTOS ────────────────────── */}
           <div style={{display:"flex", gap:4, marginBottom:12}}>
             {[
               { id: "lista", icon: "📋", label: "LISTA" },
               { id: "campo", icon: "🏑", label: "CAMPO" },
+              { id: "minutos", icon: "⏱", label: "MINUTOS" },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
-                flex:1, padding:"11px 12px", fontSize:11, fontFamily:"var(--mono)", letterSpacing:2, fontWeight:700,
+                flex:1, padding:"11px 6px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
                 border: tab === t.id ? `1px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.08)",
                 background: tab === t.id ? `${club.theme_primary}1F` : "transparent",
                 color: tab === t.id ? club.theme_primary : "var(--white-dim)", borderRadius:6
@@ -2949,6 +2950,10 @@
               </>
             );
           })()}
+
+          {tab === "minutos" && (
+            <MinutosJugadosPublico fecha={fecha} club={club} convData={convData} jugadores={jugadores}/>
+          )}
         </div>
       );
     }
@@ -3190,70 +3195,164 @@
               <span style={{letterSpacing:1.5, fontWeight:600}}>ÁRBITROS</span> · {fecha.arbitros}
             </div>
           )}
-
-          {/* Minutos jugados (si hay datos cargados desde el módulo VIVO) */}
-          <MinutosJugadosPublico fecha={fecha} club={club} convData={convData} jugadores={jugadores}/>
         </div>
       );
     }
 
     // Bloque de minutos jugados para vista pública (post-finalización del partido)
     // Muestra toggle entre lista y barras. Total = duracion_real_segundos de la fecha.
+    // Barra de minutos con segmentos por cuarto.
+    // Recibe: porCuarto = { q1, q2, q3, q4 } en minutos, baseMin = total del partido en min
+    // Si porCuarto está vacío o no tiene datos, dibuja una sola barra simple.
+    function BarraMinutosCuartos({ porCuarto, baseMin, fallbackColor, height = 8 }) {
+      const tienePorCuarto = porCuarto && (porCuarto.q1 || porCuarto.q2 || porCuarto.q3 || porCuarto.q4);
+      const total = tienePorCuarto ? (porCuarto.q1 + porCuarto.q2 + porCuarto.q3 + porCuarto.q4) : 0;
+      return (
+        <div style={{
+          display:"flex", height, background:"rgba(255,255,255,0.05)",
+          borderRadius:Math.floor(height/2), overflow:"hidden"
+        }}>
+          {tienePorCuarto ? (
+            ["q1","q2","q3","q4"].map(qk => {
+              const mins = porCuarto[qk] || 0;
+              if (mins === 0) return null;
+              const widthPct = (mins / baseMin) * 100;
+              return (
+                <div key={qk} title={`${CUARTO_LABELS[parseInt(qk[1])-1]}: ${mins}'`}
+                  style={{
+                    width: `${widthPct}%`,
+                    background: CUARTO_COLORS[qk],
+                    transition: "width 0.4s ease",
+                  }}/>
+              );
+            })
+          ) : (
+            // Fallback: barra simple
+            <div style={{
+              width:"100%",
+              background: fallbackColor || "var(--plat)",
+              transition:"width 0.4s ease",
+            }}/>
+          )}
+        </div>
+      );
+    }
+
+    // Leyenda de cuartos para mostrar arriba de las barras
+    function LeyendaCuartos() {
+      return (
+        <div style={{display:"flex", gap:10, marginBottom:8, fontSize:9, color:"var(--white-dim)", fontFamily:"var(--mono)", flexWrap:"wrap"}}>
+          {["q1","q2","q3","q4"].map((qk, i) => (
+            <span key={qk} style={{display:"flex", alignItems:"center", gap:4}}>
+              <span style={{width:10, height:10, background:CUARTO_COLORS[qk], borderRadius:2, display:"inline-block"}}/>
+              {CUARTO_LABELS[i]}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
     function MinutosJugadosPublico({ fecha, club, convData, jugadores }) {
       const [viewMode, setViewMode] = useState("list");
+      const [cambiosCount, setCambiosCount] = useState(null);
 
       // Jugadores que tienen minutos jugados cargados (> 0)
       const jugaronOrdenados = convData
         .filter(r => (r.minutos_jugados || 0) > 0)
         .map(r => {
           const j = jugadores.find(x => x.id === r.jugador_id);
-          return j ? { jugador: j, minutos: r.minutos_jugados } : null;
+          const porCuarto = (r.min_q1 || r.min_q2 || r.min_q3 || r.min_q4)
+            ? { q1: r.min_q1 || 0, q2: r.min_q2 || 0, q3: r.min_q3 || 0, q4: r.min_q4 || 0 }
+            : null;
+          return j ? { jugador: j, minutos: r.minutos_jugados, porCuarto } : null;
         })
         .filter(Boolean)
         .sort((a, b) => b.minutos - a.minutos);
 
-      if (jugaronOrdenados.length === 0) return null;
+      // Cargar cantidad de cambios desde DB (para el banner)
+      useEffect(() => {
+        let cancelled = false;
+        (async () => {
+          const { count } = await sb.from("cambios")
+            .select("*", { count: "exact", head: true })
+            .eq("fecha_id", fecha.id);
+          if (!cancelled) setCambiosCount(count ?? 0);
+        })();
+        return () => { cancelled = true; };
+      }, [fecha.id]);
 
-      // Base = duración real del partido (si está guardada), sino fallback al máximo individual
+      if (jugaronOrdenados.length === 0) {
+        return (
+          <div style={{padding:30, textAlign:"center", fontSize:12, color:"var(--white-dim)", lineHeight:1.5}}>
+            ⏱ Todavía no hay minutos jugados cargados para esta fecha.
+          </div>
+        );
+      }
+
       const totalMin = fecha.duracion_real_segundos
         ? Math.round(fecha.duracion_real_segundos / 60)
         : jugaronOrdenados.reduce((acc, j) => Math.max(acc, j.minutos), 0);
       const baseMin = totalMin || 1;
 
       return (
-        <div style={{marginTop:12, padding:"10px 12px", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+        <div>
+          {/* Banner resumen: 3 contadores */}
+          <div style={{padding:12, background:"rgba(255,255,255,0.02)", borderRadius:6, marginBottom:12}}>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:22, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)"}}>
+                  {cambiosCount ?? "–"}
+                </div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>CAMBIOS</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:22, fontWeight:900, color:"var(--green)", fontFamily:"var(--mono)"}}>
+                  {jugaronOrdenados.length}
+                </div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>JUGARON</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:22, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                  {baseMin}'
+                </div>
+                <div style={{fontSize:8, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600, marginTop:2}}>MIN TOTAL</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Toggle list/bars */}
           <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
             <div style={{fontSize:9, letterSpacing:2.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:700}}>
-              ⏱ MINUTOS JUGADOS · TOTAL {baseMin}'
+              ⏱ MINUTOS JUGADOS
             </div>
             <div style={{display:"flex", gap:2, background:"rgba(255,255,255,0.03)", padding:2, borderRadius:4}}>
               <button onClick={() => setViewMode("list")} style={{
-                padding:"3px 9px", fontSize:9, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                padding:"4px 10px", fontSize:10, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
                 background: viewMode === "list" ? (club.theme_primary || "var(--plat)") : "transparent",
                 color: viewMode === "list" ? "var(--bg)" : "var(--white-dim)",
                 border:"none", borderRadius:3, cursor:"pointer"
-              }}>📋</button>
+              }}>📋 Lista</button>
               <button onClick={() => setViewMode("bars")} style={{
-                padding:"3px 9px", fontSize:9, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                padding:"4px 10px", fontSize:10, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
                 background: viewMode === "bars" ? (club.theme_primary || "var(--plat)") : "transparent",
                 color: viewMode === "bars" ? "var(--bg)" : "var(--white-dim)",
                 border:"none", borderRadius:3, cursor:"pointer"
-              }}>📊</button>
+              }}>📊 Barras</button>
             </div>
           </div>
 
           {/* Vista lista */}
           {viewMode === "list" && (
-            <div style={{display:"flex", flexDirection:"column", gap:3}}>
+            <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, padding:"10px 12px", display:"flex", flexDirection:"column", gap:6}}>
               {jugaronOrdenados.map(entry => (
-                <div key={entry.jugador.id} style={{display:"flex", alignItems:"center", gap:8, fontSize:11, color:"var(--white-soft)"}}>
-                  <span style={{minWidth:22, fontSize:10, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                <div key={entry.jugador.id} style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color:"var(--white-soft)"}}>
+                  <span style={{minWidth:24, fontSize:11, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
                     {entry.jugador.numero ?? "?"}
                   </span>
                   <div style={{flex:1, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
                     {entry.jugador.nombre}
                   </div>
-                  <span style={{fontSize:11, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                  <span style={{fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
                     {entry.minutos}'
                   </span>
                 </div>
@@ -3261,32 +3360,35 @@
             </div>
           )}
 
-          {/* Vista barras */}
+          {/* Vista barras con degradé de cuartos */}
           {viewMode === "bars" && (
-            <div>
+            <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, padding:"10px 12px"}}>
+              <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:6, fontFamily:"var(--mono)", letterSpacing:1.5}}>
+                Base: {baseMin}' (duración del partido)
+              </div>
+              <LeyendaCuartos/>
               {jugaronOrdenados.map(entry => {
                 const pct = Math.round((entry.minutos / baseMin) * 100);
                 return (
-                  <div key={entry.jugador.id} style={{marginBottom:6}}>
-                    <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:2, fontSize:10}}>
-                      <span style={{minWidth:20, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                  <div key={entry.jugador.id} style={{marginBottom:8}}>
+                    <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:3, fontSize:11}}>
+                      <span style={{minWidth:22, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
                         {entry.jugador.numero ?? "?"}
                       </span>
                       <div style={{flex:1, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"var(--white-soft)"}}>
                         {entry.jugador.nombre}
                       </div>
                       <span style={{color:"var(--white-dim)", fontFamily:"var(--mono)"}}>{entry.minutos}'</span>
-                      <span style={{minWidth:36, textAlign:"right", fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                      <span style={{minWidth:38, textAlign:"right", fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
                         {pct}%
                       </span>
                     </div>
-                    <div style={{height:6, background:"rgba(255,255,255,0.05)", borderRadius:3, overflow:"hidden"}}>
-                      <div style={{
-                        height:"100%", width:`${pct}%`,
-                        background:`linear-gradient(90deg, ${club.theme_primary || "var(--plat)"} 0%, ${club.theme_primary || "var(--plat)"}AA 100%)`,
-                        borderRadius:3, transition:"width 0.4s ease"
-                      }}/>
-                    </div>
+                    <BarraMinutosCuartos
+                      porCuarto={entry.porCuarto}
+                      baseMin={baseMin}
+                      fallbackColor={club.theme_primary}
+                      height={8}
+                    />
                   </div>
                 );
               })}
@@ -7555,6 +7657,14 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     // Helper: clave de localStorage por fecha
     const vivoKey = fechaId => `vivo_${fechaId}`;
     const CUARTO_DURACION = 15 * 60; // 15 min en segundos
+    // Colores por cuarto (para el degradé en barras de minutos jugados)
+    const CUARTO_COLORS = {
+      q1: "#4FC3F7",   // celeste
+      q2: "#66BB6A",   // verde
+      q3: "#FFA726",   // naranja
+      q4: "#EF5350",   // rojo
+    };
+    const CUARTO_LABELS = ["Q1", "Q2", "Q3", "Q4"];
 
     function VivoTabContent({ fecha, club, jugadores, convRows, reload }) {
       const positions = getFormationPositions(fecha.formacion || "4-3-3");
@@ -7578,11 +7688,14 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         const formacionActual = {};
         const minutosJugados = {};
         const tiempoSinCambio = {};
+        // minutosPorCuarto: { jugadorId: { q1: segs, q2: segs, q3: segs, q4: segs } }
+        const minutosPorCuarto = {};
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
           if (r?.status === "convocado") {
             minutosJugados[j.id] = 0;
             tiempoSinCambio[j.id] = 0;
+            minutosPorCuarto[j.id] = { q1: 0, q2: 0, q3: 0, q4: 0 };
             if (r.es_titular === true && r.field_pos) {
               formacionActual[j.id] = r.field_pos;
             }
@@ -7600,6 +7713,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           formacionActual,
           minutosJugados,
           tiempoSinCambio,
+          minutosPorCuarto,
           cambios: [],
         };
       };
@@ -7630,10 +7744,16 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const hayMinutos = convRows.some(r => (r.minutos_jugados || 0) > 0);
           if ((cambiosDb && cambiosDb.length > 0) || hayMinutos) {
             const minutosMap = {};
+            const porCuartoMap = {};
             for (const r of convRows) {
               if (r.minutos_jugados) minutosMap[r.jugador_id] = r.minutos_jugados;
+              if (r.min_q1 || r.min_q2 || r.min_q3 || r.min_q4) {
+                porCuartoMap[r.jugador_id] = {
+                  q1: r.min_q1 || 0, q2: r.min_q2 || 0, q3: r.min_q3 || 0, q4: r.min_q4 || 0,
+                };
+              }
             }
-            setPartidoFinalizado({ cambios: cambiosDb || [], minutos: minutosMap });
+            setPartidoFinalizado({ cambios: cambiosDb || [], minutos: minutosMap, porCuarto: porCuartoMap });
           } else {
             setPartidoFinalizado(false);
           }
@@ -7656,12 +7776,12 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             segundosCuarto: s.segundosCuarto,
             minutosJugados: s.minutosJugados,
             tiempoSinCambio: s.tiempoSinCambio,
+            minutosPorCuarto: s.minutosPorCuarto || {},
           };
         }
         const offset = Math.max(0, Math.floor((now - s.startedAt) / 1000));
-        // Cap al final del cuarto: si pasamos los 15 min, congelamos en 900
         const segs = Math.min(s.segundosCuarto + offset, CUARTO_DURACION);
-        const realOffset = segs - s.segundosCuarto; // el offset que realmente sumamos (cap por fin de cuarto)
+        const realOffset = segs - s.segundosCuarto;
         const minutos = { ...s.minutosJugados };
         for (const jId of Object.keys(s.formacionActual)) {
           minutos[jId] = (minutos[jId] || 0) + realOffset;
@@ -7670,10 +7790,18 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         for (const jId of Object.keys(s.tiempoSinCambio)) {
           sinCambio[jId] = (sinCambio[jId] || 0) + realOffset;
         }
+        // Sumar el realOffset al cuarto actual de cada jugador en cancha
+        const porCuarto = { ...(s.minutosPorCuarto || {}) };
+        const qKey = `q${s.cuarto}`;
+        for (const jId of Object.keys(s.formacionActual)) {
+          const prev = porCuarto[jId] || { q1: 0, q2: 0, q3: 0, q4: 0 };
+          porCuarto[jId] = { ...prev, [qKey]: (prev[qKey] || 0) + realOffset };
+        }
         return {
           segundosCuarto: segs,
           minutosJugados: minutos,
           tiempoSinCambio: sinCambio,
+          minutosPorCuarto: porCuarto,
         };
       };
 
@@ -7735,6 +7863,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             segundosCuarto: live.segundosCuarto,
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
+            minutosPorCuarto: live.minutosPorCuarto,
           };
         } else {
           // Jugando: marcar startedAt con timestamp actual
@@ -7756,6 +7885,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             startedAt: null,
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
+            minutosPorCuarto: live.minutosPorCuarto,
           };
         });
       };
@@ -7771,6 +7901,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             startedAt: null,
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
+            minutosPorCuarto: live.minutosPorCuarto,
           };
         });
       };
@@ -7935,12 +8066,14 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const newFormacion = { ...s.formacionActual };
           const newMinutos = { ...live.minutosJugados };
           const newSinCambio = { ...live.tiempoSinCambio };
+          const newPorCuarto = { ...(live.minutosPorCuarto || {}) };
           const newCambios = [...s.cambios];
           for (const c of cambiosPendientes) {
             const fieldPos = newFormacion[c.sale_id];
             delete newFormacion[c.sale_id];
             newFormacion[c.entra_id] = fieldPos;
             if (newMinutos[c.entra_id] == null) newMinutos[c.entra_id] = 0;
+            if (!newPorCuarto[c.entra_id]) newPorCuarto[c.entra_id] = { q1: 0, q2: 0, q3: 0, q4: 0 };
             newSinCambio[c.sale_id] = 0;
             newSinCambio[c.entra_id] = 0;
             newCambios.push({
@@ -7958,6 +8091,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             formacionActual: newFormacion,
             minutosJugados: newMinutos,
             tiempoSinCambio: newSinCambio,
+            minutosPorCuarto: newPorCuarto,
             cambios: newCambios,
             startedAt: s.isRunning ? Date.now() : null,
           };
@@ -8001,7 +8135,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             const { error } = await sb.from("cambios").insert(payload);
             if (error) throw error;
           }
-          // 2. Update de minutos_jugados y entro_cuarto en fecha_jugadores
+          // 2. Update de minutos_jugados, entro_cuarto y minutos por cuarto en fecha_jugadores
           for (const jId of Object.keys(live.minutosJugados)) {
             const minutos = Math.round(live.minutosJugados[jId] / 60);
             const r = convRows.find(x => x.jugador_id === jId);
@@ -8011,8 +8145,17 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               const primerCambio = state.cambios.find(c => c.entra_id === jId);
               if (primerCambio) entroCuarto = primerCambio.cuarto;
             }
+            // Minutos por cuarto (cada uno es segundos → redondeo a minuto)
+            const pc = (live.minutosPorCuarto || {})[jId] || { q1: 0, q2: 0, q3: 0, q4: 0 };
             await sb.from("fecha_jugadores")
-              .update({ minutos_jugados: minutos, entro_cuarto: entroCuarto })
+              .update({
+                minutos_jugados: minutos,
+                entro_cuarto: entroCuarto,
+                min_q1: Math.round((pc.q1 || 0) / 60),
+                min_q2: Math.round((pc.q2 || 0) / 60),
+                min_q3: Math.round((pc.q3 || 0) / 60),
+                min_q4: Math.round((pc.q4 || 0) / 60),
+              })
               .eq("fecha_id", fecha.id)
               .eq("jugador_id", jId);
           }
@@ -8050,7 +8193,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           await sb.from("cambios").delete().eq("fecha_id", fecha.id);
           // Resetear minutos_jugados y entro_cuarto en fecha_jugadores
           await sb.from("fecha_jugadores")
-            .update({ minutos_jugados: 0, entro_cuarto: null })
+            .update({ minutos_jugados: 0, entro_cuarto: null, min_q1: 0, min_q2: 0, min_q3: 0, min_q4: 0 })
             .eq("fecha_id", fecha.id);
           setPartidoFinalizado(false);
           localStorage.removeItem(vivoKey(fecha.id));
@@ -8302,11 +8445,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                   {/* Vista barras */}
                   {minutosViewMode === "bars" && (
                     <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, padding:"10px 12px"}}>
-                      <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:10, fontFamily:"var(--mono)", letterSpacing:1.5}}>
+                      <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:6, fontFamily:"var(--mono)", letterSpacing:1.5}}>
                         Base: {baseMin}' (duración del partido)
                       </div>
+                      <LeyendaCuartos/>
                       {jugaronOrdenados.map(entry => {
                         const pct = Math.round((entry.minutos / baseMin) * 100);
+                        const porCuarto = (partidoFinalizado.porCuarto || {})[entry.jugador.id];
                         return (
                           <div key={entry.jugador.id} style={{marginBottom:8}}>
                             {/* Fila info: número + nombre + valor */}
@@ -8324,16 +8469,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                                 {pct}%
                               </span>
                             </div>
-                            {/* Barra */}
-                            <div style={{height:8, background:"rgba(255,255,255,0.05)", borderRadius:4, overflow:"hidden"}}>
-                              <div style={{
-                                height:"100%",
-                                width:`${pct}%`,
-                                background:`linear-gradient(90deg, ${club.theme_primary} 0%, ${club.theme_primary}AA 100%)`,
-                                borderRadius:4,
-                                transition:"width 0.4s ease"
-                              }}/>
-                            </div>
+                            {/* Barra con segmentos por cuarto */}
+                            <BarraMinutosCuartos
+                              porCuarto={porCuarto}
+                              baseMin={baseMin}
+                              fallbackColor={club.theme_primary}
+                              height={9}
+                            />
                           </div>
                         );
                       })}
@@ -8423,6 +8565,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                       ...s, cuarto: c, segundosCuarto: 0, isRunning: false, startedAt: null,
                       minutosJugados: live.minutosJugados,
                       tiempoSinCambio: live.tiempoSinCambio,
+                      minutosPorCuarto: live.minutosPorCuarto,
                     };
                   })}
                     style={{
