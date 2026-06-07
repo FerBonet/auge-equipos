@@ -3190,6 +3190,108 @@
               <span style={{letterSpacing:1.5, fontWeight:600}}>ÁRBITROS</span> · {fecha.arbitros}
             </div>
           )}
+
+          {/* Minutos jugados (si hay datos cargados desde el módulo VIVO) */}
+          <MinutosJugadosPublico fecha={fecha} club={club} convData={convData} jugadores={jugadores}/>
+        </div>
+      );
+    }
+
+    // Bloque de minutos jugados para vista pública (post-finalización del partido)
+    // Muestra toggle entre lista y barras. Total = duracion_real_segundos de la fecha.
+    function MinutosJugadosPublico({ fecha, club, convData, jugadores }) {
+      const [viewMode, setViewMode] = useState("list");
+
+      // Jugadores que tienen minutos jugados cargados (> 0)
+      const jugaronOrdenados = convData
+        .filter(r => (r.minutos_jugados || 0) > 0)
+        .map(r => {
+          const j = jugadores.find(x => x.id === r.jugador_id);
+          return j ? { jugador: j, minutos: r.minutos_jugados } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.minutos - a.minutos);
+
+      if (jugaronOrdenados.length === 0) return null;
+
+      // Base = duración real del partido (si está guardada), sino fallback al máximo individual
+      const totalMin = fecha.duracion_real_segundos
+        ? Math.round(fecha.duracion_real_segundos / 60)
+        : jugaronOrdenados.reduce((acc, j) => Math.max(acc, j.minutos), 0);
+      const baseMin = totalMin || 1;
+
+      return (
+        <div style={{marginTop:12, padding:"10px 12px", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+          <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
+            <div style={{fontSize:9, letterSpacing:2.5, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:700}}>
+              ⏱ MINUTOS JUGADOS · TOTAL {baseMin}'
+            </div>
+            <div style={{display:"flex", gap:2, background:"rgba(255,255,255,0.03)", padding:2, borderRadius:4}}>
+              <button onClick={() => setViewMode("list")} style={{
+                padding:"3px 9px", fontSize:9, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                background: viewMode === "list" ? (club.theme_primary || "var(--plat)") : "transparent",
+                color: viewMode === "list" ? "var(--bg)" : "var(--white-dim)",
+                border:"none", borderRadius:3, cursor:"pointer"
+              }}>📋</button>
+              <button onClick={() => setViewMode("bars")} style={{
+                padding:"3px 9px", fontSize:9, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                background: viewMode === "bars" ? (club.theme_primary || "var(--plat)") : "transparent",
+                color: viewMode === "bars" ? "var(--bg)" : "var(--white-dim)",
+                border:"none", borderRadius:3, cursor:"pointer"
+              }}>📊</button>
+            </div>
+          </div>
+
+          {/* Vista lista */}
+          {viewMode === "list" && (
+            <div style={{display:"flex", flexDirection:"column", gap:3}}>
+              {jugaronOrdenados.map(entry => (
+                <div key={entry.jugador.id} style={{display:"flex", alignItems:"center", gap:8, fontSize:11, color:"var(--white-soft)"}}>
+                  <span style={{minWidth:22, fontSize:10, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                    {entry.jugador.numero ?? "?"}
+                  </span>
+                  <div style={{flex:1, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                    {entry.jugador.nombre}
+                  </div>
+                  <span style={{fontSize:11, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                    {entry.minutos}'
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Vista barras */}
+          {viewMode === "bars" && (
+            <div>
+              {jugaronOrdenados.map(entry => {
+                const pct = Math.round((entry.minutos / baseMin) * 100);
+                return (
+                  <div key={entry.jugador.id} style={{marginBottom:6}}>
+                    <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:2, fontSize:10}}>
+                      <span style={{minWidth:20, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                        {entry.jugador.numero ?? "?"}
+                      </span>
+                      <div style={{flex:1, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"var(--white-soft)"}}>
+                        {entry.jugador.nombre}
+                      </div>
+                      <span style={{color:"var(--white-dim)", fontFamily:"var(--mono)"}}>{entry.minutos}'</span>
+                      <span style={{minWidth:36, textAlign:"right", fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                        {pct}%
+                      </span>
+                    </div>
+                    <div style={{height:6, background:"rgba(255,255,255,0.05)", borderRadius:3, overflow:"hidden"}}>
+                      <div style={{
+                        height:"100%", width:`${pct}%`,
+                        background:`linear-gradient(90deg, ${club.theme_primary || "var(--plat)"} 0%, ${club.theme_primary || "var(--plat)"}AA 100%)`,
+                        borderRadius:3, transition:"width 0.4s ease"
+                      }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
     }
@@ -7875,10 +7977,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const finalizarPartido = async () => {
         // Snapshot de los valores live para que el resumen y el guardado sean exactos
         const live = computeLiveValues(state, Date.now());
+        // Duración total real del partido: cuartos completos × 15min + segundos del cuarto actual
+        const duracionRealSegs = (state.cuarto - 1) * CUARTO_DURACION + live.segundosCuarto;
         if (!confirm(
           `¿Finalizar el partido y guardar todo en la base de datos?\n\n` +
           `Cambios registrados: ${state.cambios.length}\n` +
-          `Jugadoras que jugaron: ${Object.keys(live.minutosJugados).filter(k => live.minutosJugados[k] > 0).length}\n\n` +
+          `Jugadoras que jugaron: ${Object.keys(live.minutosJugados).filter(k => live.minutosJugados[k] > 0).length}\n` +
+          `Duración del partido: ${Math.floor(duracionRealSegs/60)}'\n\n` +
           `Esta acción NO se puede deshacer.`
         )) return;
         setFinalizando(true);
@@ -7911,7 +8016,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               .eq("fecha_id", fecha.id)
               .eq("jugador_id", jId);
           }
-          // 3. Limpiar localStorage
+          // 3. Guardar la duración real del partido en la fecha
+          await sb.from("fechas")
+            .update({ duracion_real_segundos: duracionRealSegs })
+            .eq("id", fecha.id);
+          // 4. Limpiar localStorage
           localStorage.removeItem(vivoKey(fecha.id));
           alert("✓ Partido finalizado. Datos guardados en la base de datos.");
           if (reload) await reload();
@@ -8141,8 +8250,12 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
             {/* Lista de minutos jugados */}
             {jugaronOrdenados.length > 0 && (() => {
-              // El "total real" del partido = la jugadora que más jugó (su % es 100)
-              const maxMin = jugaronOrdenados.reduce((acc, j) => Math.max(acc, j.minutos), 0) || 1;
+              // Base = duración real del partido (guardada en fecha.duracion_real_segundos)
+              // Si no está guardado (partidos viejos), uso la jugadora que más jugó como fallback
+              const totalMin = fecha.duracion_real_segundos
+                ? Math.round(fecha.duracion_real_segundos / 60)
+                : jugaronOrdenados.reduce((acc, j) => Math.max(acc, j.minutos), 0);
+              const baseMin = totalMin || 1;
               return (
                 <div style={{marginBottom:14}}>
                   {/* Encabezado con toggle list/bars */}
@@ -8190,10 +8303,10 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                   {minutosViewMode === "bars" && (
                     <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, padding:"10px 12px"}}>
                       <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:10, fontFamily:"var(--mono)", letterSpacing:1.5}}>
-                        Base: {maxMin}' (la más utilizada = 100%)
+                        Base: {baseMin}' (duración del partido)
                       </div>
                       {jugaronOrdenados.map(entry => {
-                        const pct = Math.round((entry.minutos / maxMin) * 100);
+                        const pct = Math.round((entry.minutos / baseMin) * 100);
                         return (
                           <div key={entry.jugador.id} style={{marginBottom:8}}>
                             {/* Fila info: número + nombre + valor */}
