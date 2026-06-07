@@ -4451,7 +4451,7 @@
     }
 
     // Busca un rival en la tabla global por nombre normalizado.
-    // Devuelve el registro completo o null si no existe.
+    // Devuelve el registro EXACTO si existe.
     async function findRivalGlobal(rivalName) {
       const key = normalizeRivalName(rivalName);
       if (!key) return null;
@@ -4459,6 +4459,21 @@
         .select("*").eq("nombre_key", key).maybeSingle();
       if (error) { console.error("Error buscando rival:", error); return null; }
       return data;
+    }
+
+    // Busca un rival y sus posibles variantes (multi-sede).
+    // Por ejemplo, si pasás "SIC" → devuelve "sic", "sic-anexo", "sic-b", etc.
+    // Devuelve array (puede estar vacío).
+    async function findRivalGlobalVariants(rivalName) {
+      const key = normalizeRivalName(rivalName);
+      if (!key) return [];
+      // Match exacto + variantes que empiezan con el key (ej: "sic" → "sic", "sic-anexo")
+      const { data, error } = await sb.from("rivales_globales")
+        .select("*")
+        .or(`nombre_key.eq.${key},nombre_key.like.${key}-%`)
+        .order("nombre_key", { ascending: true });
+      if (error) { console.error("Error buscando variantes:", error); return []; }
+      return data || [];
     }
 
     // Crea o actualiza un rival en la tabla global (upsert por nombre_key).
@@ -6811,7 +6826,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         formacion: fecha.formacion || "4-3-3",
       });
       const [saving, setSaving] = useState(false);
-      const [rivalGlobalInfo, setRivalGlobalInfo] = useState(null);
+      const [rivalVariants, setRivalVariants] = useState([]); // [{ id, nombre_key, nombre_display, cancha, maps_url }, ...]
+      const [selectedVariantIdx, setSelectedVariantIdx] = useState(-1); // índice elegido si hay multi
 
       const u = (k, v) => setData(d => ({...d, [k]: v}));
 
@@ -6822,28 +6838,51 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         }
       }, [data.condition]);
 
-      // Cuando el rival cambia y soy visitante, buscar en tabla global
+      // Cuando el rival cambia y soy visitante, buscar variantes en la tabla global
       useEffect(() => {
         if (data.condition !== "Visitante" || !data.rival.trim()) {
-          setRivalGlobalInfo(null);
+          setRivalVariants([]);
+          setSelectedVariantIdx(-1);
           return;
         }
         let cancelled = false;
         (async () => {
-          const found = await findRivalGlobal(data.rival);
+          const variants = await findRivalGlobalVariants(data.rival);
           if (cancelled) return;
-          setRivalGlobalInfo(found);
+          setRivalVariants(variants);
+          // Auto-aplicar UNA SOLA variante si el campo location está vacío
+          if (variants.length === 1 && !data.location?.trim()) {
+            const v = variants[0];
+            setData(d => ({
+              ...d,
+              location: v.cancha || d.location,
+              maps_url: v.maps_url || d.maps_url,
+            }));
+            setSelectedVariantIdx(0);
+          } else if (variants.length > 1) {
+            // Si hay múltiples variantes, intentar elegir la que matchea la cancha actual
+            const matchByLocation = variants.findIndex(v => v.cancha === data.location);
+            setSelectedVariantIdx(matchByLocation >= 0 ? matchByLocation : -1);
+          }
         })();
         return () => { cancelled = true; };
       }, [data.rival, data.condition]);
 
-      const applyGlobalRival = () => {
-        if (!rivalGlobalInfo) return;
+      const applyVariant = (idx) => {
+        const v = rivalVariants[idx];
+        if (!v) return;
+        setSelectedVariantIdx(idx);
         setData(d => ({
           ...d,
-          location: rivalGlobalInfo.cancha || d.location,
-          maps_url: rivalGlobalInfo.maps_url || d.maps_url,
+          location: v.cancha || d.location,
+          maps_url: v.maps_url || d.maps_url,
         }));
+      };
+
+      // El rival "info" que se muestra como cartel (la variante elegida o la primera)
+      const rivalGlobalInfo = selectedVariantIdx >= 0 ? rivalVariants[selectedVariantIdx] : (rivalVariants[0] || null);
+      const applyGlobalRival = () => {
+        if (rivalGlobalInfo) applyVariant(rivalVariants.indexOf(rivalGlobalInfo));
       };
 
       const handleSave = async () => {
@@ -6894,21 +6933,42 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               <option value="Visitante">Visitante</option>
             </select>
           </Field>
-          {rivalGlobalInfo && data.condition === "Visitante" && (
+          {rivalVariants.length > 0 && data.condition === "Visitante" && (
             <div style={{
               padding:"10px 12px", background:"var(--gold-dim)",
               border:"1px solid rgba(240,208,80,0.3)", borderRadius:6, marginBottom:12,
               fontSize:12
             }}>
-              <div style={{fontSize:10, fontFamily:"var(--mono)", color:"var(--gold)", letterSpacing:2, marginBottom:4}}>
+              <div style={{fontSize:10, fontFamily:"var(--mono)", color:"var(--gold)", letterSpacing:2, marginBottom:6}}>
                 💡 RIVAL CONOCIDO EN LA PLATAFORMA
               </div>
-              <div style={{color:"var(--white-soft)", lineHeight:1.5, marginBottom:8}}>
-                {rivalGlobalInfo.cancha && <>Cancha registrada: <strong style={{color:"var(--white)"}}>{rivalGlobalInfo.cancha}</strong></>}
-                {rivalGlobalInfo.cancha && rivalGlobalInfo.maps_url && " · "}
-                {rivalGlobalInfo.maps_url && <a href={rivalGlobalInfo.maps_url} target="_blank" rel="noopener" style={{color:"var(--plat)"}}>Ver maps ↗</a>}
-              </div>
-              {((rivalGlobalInfo.cancha && rivalGlobalInfo.cancha !== data.location) ||
+              {/* Si hay múltiples variantes, dropdown para elegir */}
+              {rivalVariants.length > 1 ? (
+                <>
+                  <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:6}}>
+                    Este rival tiene <strong>{rivalVariants.length} canchas</strong> distintas. ¿En cuál se juega?
+                  </div>
+                  <select value={selectedVariantIdx} onChange={e => {
+                    const idx = parseInt(e.target.value);
+                    if (idx >= 0) applyVariant(idx);
+                    else setSelectedVariantIdx(-1);
+                  }} style={{...inputStyle, fontSize:12, marginBottom:6}}>
+                    <option value={-1}>— Elegir cancha —</option>
+                    {rivalVariants.map((v, i) => (
+                      <option key={v.id} value={i}>
+                        {v.nombre_display || v.cancha || v.nombre_key}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <div style={{color:"var(--white-soft)", lineHeight:1.5, marginBottom:8}}>
+                  {rivalGlobalInfo?.cancha && <>Cancha registrada: <strong style={{color:"var(--white)"}}>{rivalGlobalInfo.cancha}</strong></>}
+                  {rivalGlobalInfo?.cancha && rivalGlobalInfo?.maps_url && " · "}
+                  {rivalGlobalInfo?.maps_url && <a href={rivalGlobalInfo.maps_url} target="_blank" rel="noopener" style={{color:"var(--plat)"}}>Ver maps ↗</a>}
+                </div>
+              )}
+              {rivalGlobalInfo && ((rivalGlobalInfo.cancha && rivalGlobalInfo.cancha !== data.location) ||
                 (rivalGlobalInfo.maps_url && rivalGlobalInfo.maps_url !== data.maps_url)) && (
                 <button onClick={applyGlobalRival} type="button" style={{...btnSecondary, padding:"6px 12px", fontSize:11}}>
                   Usar estos datos
