@@ -7511,6 +7511,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // Si el partido ya fue finalizado y subido a DB
       // Estructura: null = aún chequeando, false = no finalizado, { cambios: [], minutos: {} } = finalizado
       const [partidoFinalizado, setPartidoFinalizado] = useState(null);
+      // Modo de visualización de minutos jugados en pantalla post-finalización: "list" | "bars"
+      const [minutosViewMode, setMinutosViewMode] = useState("list");
       const svgRef = useRef(null);
 
       // ─── Check al cargar: ya hay cambios en DB para esta fecha? ──────────
@@ -8138,29 +8140,95 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             </div>
 
             {/* Lista de minutos jugados */}
-            {jugaronOrdenados.length > 0 && (
-              <div style={{marginBottom:14}}>
-                <div style={{fontSize:10, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", fontWeight:700, marginBottom:8}}>
-                  ⏱ MINUTOS JUGADOS
-                </div>
-                <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, overflow:"hidden"}}>
-                  {jugaronOrdenados.map((entry, i) => (
-                    <div key={entry.jugador.id} style={{
-                      display:"flex", alignItems:"center", gap:10, padding:"8px 12px",
-                      borderBottom: i < jugaronOrdenados.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"
-                    }}>
-                      <span style={{minWidth:28, fontSize:11, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
-                        {entry.jugador.numero ?? "?"}
-                      </span>
-                      <div style={{flex:1, fontSize:12, fontWeight:600}}>{entry.jugador.nombre}</div>
-                      <span style={{fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
-                        {entry.minutos}'
-                      </span>
+            {jugaronOrdenados.length > 0 && (() => {
+              // El "total real" del partido = la jugadora que más jugó (su % es 100)
+              const maxMin = jugaronOrdenados.reduce((acc, j) => Math.max(acc, j.minutos), 0) || 1;
+              return (
+                <div style={{marginBottom:14}}>
+                  {/* Encabezado con toggle list/bars */}
+                  <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8}}>
+                    <div style={{fontSize:10, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", fontWeight:700}}>
+                      ⏱ MINUTOS JUGADOS
                     </div>
-                  ))}
+                    <div style={{display:"flex", gap:2, background:"rgba(255,255,255,0.03)", padding:2, borderRadius:4}}>
+                      <button onClick={() => setMinutosViewMode("list")} style={{
+                        padding:"4px 10px", fontSize:10, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                        background: minutosViewMode === "list" ? club.theme_primary : "transparent",
+                        color: minutosViewMode === "list" ? "var(--bg)" : "var(--white-dim)",
+                        border:"none", borderRadius:3, cursor:"pointer"
+                      }}>📋 Lista</button>
+                      <button onClick={() => setMinutosViewMode("bars")} style={{
+                        padding:"4px 10px", fontSize:10, fontFamily:"var(--mono)", fontWeight:700, letterSpacing:1,
+                        background: minutosViewMode === "bars" ? club.theme_primary : "transparent",
+                        color: minutosViewMode === "bars" ? "var(--bg)" : "var(--white-dim)",
+                        border:"none", borderRadius:3, cursor:"pointer"
+                      }}>📊 Barras</button>
+                    </div>
+                  </div>
+
+                  {/* Vista lista (original) */}
+                  {minutosViewMode === "list" && (
+                    <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, overflow:"hidden"}}>
+                      {jugaronOrdenados.map((entry, i) => (
+                        <div key={entry.jugador.id} style={{
+                          display:"flex", alignItems:"center", gap:10, padding:"8px 12px",
+                          borderBottom: i < jugaronOrdenados.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none"
+                        }}>
+                          <span style={{minWidth:28, fontSize:11, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                            {entry.jugador.numero ?? "?"}
+                          </span>
+                          <div style={{flex:1, fontSize:12, fontWeight:600}}>{entry.jugador.nombre}</div>
+                          <span style={{fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                            {entry.minutos}'
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Vista barras */}
+                  {minutosViewMode === "bars" && (
+                    <div style={{background:"rgba(255,255,255,0.02)", borderRadius:6, padding:"10px 12px"}}>
+                      <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:10, fontFamily:"var(--mono)", letterSpacing:1.5}}>
+                        Base: {maxMin}' (la más utilizada = 100%)
+                      </div>
+                      {jugaronOrdenados.map(entry => {
+                        const pct = Math.round((entry.minutos / maxMin) * 100);
+                        return (
+                          <div key={entry.jugador.id} style={{marginBottom:8}}>
+                            {/* Fila info: número + nombre + valor */}
+                            <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:3}}>
+                              <span style={{minWidth:22, fontSize:10, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
+                                {entry.jugador.numero ?? "?"}
+                              </span>
+                              <div style={{flex:1, fontSize:11, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                                {entry.jugador.nombre}
+                              </div>
+                              <span style={{fontSize:10, color:"var(--white-dim)", fontFamily:"var(--mono)"}}>
+                                {entry.minutos}'
+                              </span>
+                              <span style={{minWidth:38, textAlign:"right", fontSize:11, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                                {pct}%
+                              </span>
+                            </div>
+                            {/* Barra */}
+                            <div style={{height:8, background:"rgba(255,255,255,0.05)", borderRadius:4, overflow:"hidden"}}>
+                              <div style={{
+                                height:"100%",
+                                width:`${pct}%`,
+                                background:`linear-gradient(90deg, ${club.theme_primary} 0%, ${club.theme_primary}AA 100%)`,
+                                borderRadius:4,
+                                transition:"width 0.4s ease"
+                              }}/>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Lista de cambios por cuarto */}
             {partidoFinalizado.cambios.length > 0 && (
