@@ -3204,9 +3204,15 @@
     // Barra de minutos con segmentos por cuarto.
     // Recibe: porCuarto = { q1, q2, q3, q4 } en minutos, baseMin = total del partido en min
     // Si porCuarto está vacío o no tiene datos, dibuja una sola barra simple.
-    function BarraMinutosCuartos({ porCuarto, baseMin, fallbackColor, height = 8 }) {
+    // Recibe:
+    //   porCuarto = { q1, q2, q3, q4 } en minutos (puede ser null/undefined si no hay datos)
+    //   totalMin = minutos totales jugados por esta jugadora (usado en fallback cuando no hay porCuarto)
+    //   baseMin = duración total del partido en minutos (= 100%)
+    //   clubColor = color base del club para derivar los 4 tonos por cuarto
+    function BarraMinutosCuartos({ porCuarto, totalMin, baseMin, clubColor, fallbackColor, height = 8 }) {
       const tienePorCuarto = porCuarto && (porCuarto.q1 || porCuarto.q2 || porCuarto.q3 || porCuarto.q4);
-      const total = tienePorCuarto ? (porCuarto.q1 + porCuarto.q2 + porCuarto.q3 + porCuarto.q4) : 0;
+      const fallbackPct = totalMin && baseMin ? Math.min(100, (totalMin / baseMin) * 100) : 0;
+      const colors = getCuartoColors(clubColor || fallbackColor);
       return (
         <div style={{
           display:"flex", height, background:"rgba(255,255,255,0.05)",
@@ -3221,16 +3227,16 @@
                 <div key={qk} title={`${CUARTO_LABELS[parseInt(qk[1])-1]}: ${mins}'`}
                   style={{
                     width: `${widthPct}%`,
-                    background: CUARTO_COLORS[qk],
+                    background: colors[qk],
                     transition: "width 0.4s ease",
                   }}/>
               );
             })
           ) : (
-            // Fallback: barra simple
+            // Fallback: barra simple del color del club, ocupando el % real
             <div style={{
-              width:"100%",
-              background: fallbackColor || "var(--plat)",
+              width:`${fallbackPct}%`,
+              background: fallbackColor || clubColor || "var(--plat)",
               transition:"width 0.4s ease",
             }}/>
           )}
@@ -3239,12 +3245,13 @@
     }
 
     // Leyenda de cuartos para mostrar arriba de las barras
-    function LeyendaCuartos() {
+    function LeyendaCuartos({ clubColor }) {
+      const colors = getCuartoColors(clubColor);
       return (
         <div style={{display:"flex", gap:10, marginBottom:8, fontSize:9, color:"var(--white-dim)", fontFamily:"var(--mono)", flexWrap:"wrap"}}>
           {["q1","q2","q3","q4"].map((qk, i) => (
             <span key={qk} style={{display:"flex", alignItems:"center", gap:4}}>
-              <span style={{width:10, height:10, background:CUARTO_COLORS[qk], borderRadius:2, display:"inline-block"}}/>
+              <span style={{width:10, height:10, background:colors[qk], borderRadius:2, display:"inline-block"}}/>
               {CUARTO_LABELS[i]}
             </span>
           ))}
@@ -3366,29 +3373,44 @@
               <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:6, fontFamily:"var(--mono)", letterSpacing:1.5}}>
                 Base: {baseMin}' (duración del partido)
               </div>
-              <LeyendaCuartos/>
+              <LeyendaCuartos clubColor={club.theme_primary}/>
               {jugaronOrdenados.map(entry => {
-                const pct = Math.round((entry.minutos / baseMin) * 100);
+                const posShort = getPositionShort(entry.jugador.posicion);
+                const lineColor = getPositionColor(entry.jugador.posicion);
                 return (
-                  <div key={entry.jugador.id} style={{marginBottom:8}}>
-                    <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:3, fontSize:11}}>
-                      <span style={{minWidth:22, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
-                        {entry.jugador.numero ?? "?"}
-                      </span>
-                      <div style={{flex:1, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"var(--white-soft)"}}>
-                        {entry.jugador.nombre}
-                      </div>
-                      <span style={{color:"var(--white-dim)", fontFamily:"var(--mono)"}}>{entry.minutos}'</span>
-                      <span style={{minWidth:38, textAlign:"right", fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
-                        {pct}%
-                      </span>
+                  <div key={entry.jugador.id} style={{
+                    display:"flex", alignItems:"center", gap:10, padding:"8px 4px",
+                    borderBottom:"1px solid rgba(255,255,255,0.04)"
+                  }}>
+                    {/* Badge de posición */}
+                    {posShort ? (
+                      <span style={{
+                        minWidth:34, padding:"3px 6px", fontSize:9, fontWeight:900,
+                        fontFamily:"var(--mono)", letterSpacing:1, color:"var(--bg)",
+                        background:lineColor, borderRadius:3, textAlign:"center", flexShrink:0
+                      }}>{posShort}</span>
+                    ) : (
+                      <span style={{minWidth:34, flexShrink:0}}/>
+                    )}
+                    {/* Apellido */}
+                    <div style={{minWidth:90, maxWidth:110, fontSize:12, fontWeight:600, color:"var(--white-soft)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                      {entry.jugador.nombre.split(",")[0].split(" ")[0]}
                     </div>
-                    <BarraMinutosCuartos
-                      porCuarto={entry.porCuarto}
-                      baseMin={baseMin}
-                      fallbackColor={club.theme_primary}
-                      height={8}
-                    />
+                    {/* Barra */}
+                    <div style={{flex:1, minWidth:0}}>
+                      <BarraMinutosCuartos
+                        porCuarto={entry.porCuarto}
+                        totalMin={entry.minutos}
+                        baseMin={baseMin}
+                        clubColor={club.theme_primary}
+                        fallbackColor={club.theme_primary}
+                        height={18}
+                      />
+                    </div>
+                    {/* Minutos */}
+                    <div style={{minWidth:36, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                      {entry.minutos}'
+                    </div>
                   </div>
                 );
               })}
@@ -7657,13 +7679,19 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     // Helper: clave de localStorage por fecha
     const vivoKey = fechaId => `vivo_${fechaId}`;
     const CUARTO_DURACION = 15 * 60; // 15 min en segundos
-    // Colores por cuarto (para el degradé en barras de minutos jugados)
-    const CUARTO_COLORS = {
-      q1: "#4FC3F7",   // celeste
-      q2: "#66BB6A",   // verde
-      q3: "#FFA726",   // naranja
-      q4: "#EF5350",   // rojo
-    };
+    // Genera 4 tonos del color base del club: Q1 (más oscuro) → Q4 (más claro).
+    // Recibe un hex (#RRGGBB) y devuelve un objeto { q1, q2, q3, q4 } con tonos en CSS color-mix.
+    function getCuartoColors(baseColor) {
+      const c = baseColor || "#2D9D6F";
+      // Usamos opacidades sobre el color base + un overlay blanco para los tonos más claros.
+      // Q1 = base 100%, Q2 = mezcla con 18% blanco, Q3 = 35%, Q4 = 55%.
+      return {
+        q1: c,
+        q2: `color-mix(in srgb, ${c} 82%, white 18%)`,
+        q3: `color-mix(in srgb, ${c} 65%, white 35%)`,
+        q4: `color-mix(in srgb, ${c} 45%, white 55%)`,
+      };
+    }
     const CUARTO_LABELS = ["Q1", "Q2", "Q3", "Q4"];
 
     function VivoTabContent({ fecha, club, jugadores, convRows, reload }) {
@@ -8448,34 +8476,45 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                       <div style={{fontSize:9, color:"var(--white-dim)", marginBottom:6, fontFamily:"var(--mono)", letterSpacing:1.5}}>
                         Base: {baseMin}' (duración del partido)
                       </div>
-                      <LeyendaCuartos/>
+                      <LeyendaCuartos clubColor={club.theme_primary}/>
                       {jugaronOrdenados.map(entry => {
-                        const pct = Math.round((entry.minutos / baseMin) * 100);
                         const porCuarto = (partidoFinalizado.porCuarto || {})[entry.jugador.id];
+                        const posShort = getPositionShort(entry.jugador.posicion);
+                        const lineColor = getPositionColor(entry.jugador.posicion);
                         return (
-                          <div key={entry.jugador.id} style={{marginBottom:8}}>
-                            {/* Fila info: número + nombre + valor */}
-                            <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:3}}>
-                              <span style={{minWidth:22, fontSize:10, fontWeight:900, color:club.theme_primary, fontFamily:"var(--mono)", textAlign:"center"}}>
-                                {entry.jugador.numero ?? "?"}
-                              </span>
-                              <div style={{flex:1, fontSize:11, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-                                {entry.jugador.nombre}
-                              </div>
-                              <span style={{fontSize:10, color:"var(--white-dim)", fontFamily:"var(--mono)"}}>
-                                {entry.minutos}'
-                              </span>
-                              <span style={{minWidth:38, textAlign:"right", fontSize:11, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
-                                {pct}%
-                              </span>
+                          <div key={entry.jugador.id} style={{
+                            display:"flex", alignItems:"center", gap:10, padding:"8px 4px",
+                            borderBottom:"1px solid rgba(255,255,255,0.04)"
+                          }}>
+                            {/* Badge de posición */}
+                            {posShort ? (
+                              <span style={{
+                                minWidth:34, padding:"3px 6px", fontSize:9, fontWeight:900,
+                                fontFamily:"var(--mono)", letterSpacing:1, color:"var(--bg)",
+                                background:lineColor, borderRadius:3, textAlign:"center", flexShrink:0
+                              }}>{posShort}</span>
+                            ) : (
+                              <span style={{minWidth:34, flexShrink:0}}/>
+                            )}
+                            {/* Apellido */}
+                            <div style={{minWidth:90, maxWidth:110, fontSize:12, fontWeight:600, color:"var(--white-soft)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                              {entry.jugador.nombre.split(",")[0].split(" ")[0]}
                             </div>
-                            {/* Barra con segmentos por cuarto */}
-                            <BarraMinutosCuartos
-                              porCuarto={porCuarto}
-                              baseMin={baseMin}
-                              fallbackColor={club.theme_primary}
-                              height={9}
-                            />
+                            {/* Barra */}
+                            <div style={{flex:1, minWidth:0}}>
+                              <BarraMinutosCuartos
+                                porCuarto={porCuarto}
+                                totalMin={entry.minutos}
+                                baseMin={baseMin}
+                                clubColor={club.theme_primary}
+                                fallbackColor={club.theme_primary}
+                                height={18}
+                              />
+                            </div>
+                            {/* Minutos */}
+                            <div style={{minWidth:36, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                              {entry.minutos}'
+                            </div>
                           </div>
                         );
                       })}
