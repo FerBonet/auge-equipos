@@ -3407,9 +3407,9 @@
                         height={18}
                       />
                     </div>
-                    {/* Minutos */}
-                    <div style={{minWidth:36, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
-                      {entry.minutos}'
+                    {/* Porcentaje */}
+                    <div style={{minWidth:42, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                      {Math.round((entry.minutos / baseMin) * 100)}%
                     </div>
                   </div>
                 );
@@ -8511,9 +8511,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                                 height={18}
                               />
                             </div>
-                            {/* Minutos */}
-                            <div style={{minWidth:36, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
-                              {entry.minutos}'
+                            {/* Porcentaje */}
+                            <div style={{minWidth:42, textAlign:"right", fontSize:13, fontWeight:900, color:"var(--gold)", fontFamily:"var(--mono)"}}>
+                              {Math.round((entry.minutos / baseMin) * 100)}%
                             </div>
                           </div>
                         );
