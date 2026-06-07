@@ -1623,6 +1623,9 @@
     function ClubView({ clubInfo, session, onExit, isSuperAdmin, onGoSuperAdmin, impersonating }) {
       const [club, setClub] = useState(clubInfo);
       const [view, setView] = usePersistedState(`clubview_${clubInfo.id}_view`, "public");
+      // Cuando el user entra al admin desde la vista pública, llevamos la fecha que estaba mirando
+      // para que el admin abra ahí directamente. Se consume y se limpia.
+      const [adminInitialFechaId, setAdminInitialFechaId] = useState(null);
       const isOwnerOrAdmin = clubInfo.myRole === "owner" || clubInfo.myRole === "admin";
 
       if (!club.setup_done && isOwnerOrAdmin) {
@@ -1642,11 +1645,13 @@
       }
       if (view === "admin" && isOwnerOrAdmin) {
         return <ClubAdminPanel club={club} session={session} myRole={clubInfo.myRole}
+          initialFechaId={adminInitialFechaId}
+          onConsumedFechaId={() => setAdminInitialFechaId(null)}
           onExit={() => setView("public")}
           onClubUpdate={(updated) => setClub({...updated, myRole: clubInfo.myRole})}
           impersonating={impersonating}/>;
       }
-      return <ClubPublicView club={club} session={session} myRole={clubInfo.myRole} onOpenAdmin={() => setView("admin")} onExit={onExit} isSuperAdmin={isSuperAdmin} onGoSuperAdmin={onGoSuperAdmin} impersonating={impersonating}/>;
+      return <ClubPublicView club={club} session={session} myRole={clubInfo.myRole} onOpenAdmin={(fechaId) => { setAdminInitialFechaId(fechaId || null); setView("admin"); }} onExit={onExit} isSuperAdmin={isSuperAdmin} onGoSuperAdmin={onGoSuperAdmin} impersonating={impersonating}/>;
     }
 
     function SetupWizard({ club, session, onFinish }) {
@@ -3694,7 +3699,7 @@
               )}
               <div style={{marginTop:50, paddingTop:24, borderTop:"1px solid rgba(255,255,255,0.05)", textAlign:"center", display:"flex", flexDirection:"column", gap:8, alignItems:"center"}}>
                 {isOwnerOrAdmin && (
-                  <button onClick={onOpenAdmin} style={{background:"transparent", border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)", padding:"6px 14px", borderRadius:3, fontSize:10, fontFamily:"var(--mono)", letterSpacing:2}}>⚙ PANEL ADMIN</button>
+                  <button onClick={() => onOpenAdmin(fechaActualId)} style={{background:"transparent", border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)", padding:"6px 14px", borderRadius:3, fontSize:10, fontFamily:"var(--mono)", letterSpacing:2}}>⚙ PANEL ADMIN</button>
                 )}
                 {isSuperAdmin && (
                   <button onClick={onGoSuperAdmin} style={{background:"transparent", border:"1px solid var(--gold)", color:"var(--gold)", padding:"6px 14px", borderRadius:3, fontSize:10, fontFamily:"var(--mono)", letterSpacing:2}}>⭐ SUPER ADMIN</button>
@@ -3707,11 +3712,18 @@
       );
     }
 
-    function ClubAdminPanel({ club, session, myRole, onExit, onClubUpdate, impersonating }) {
+    function ClubAdminPanel({ club, session, myRole, onExit, onClubUpdate, impersonating, initialFechaId, onConsumedFechaId }) {
       const [pendingRequests, setPendingRequests] = useState([]);
       const [counts, setCounts] = useState({ jugadores:0, fechas:0 });
       const [editingClub, setEditingClub] = usePersistedState(`adminpanel_${club.id}_editing`, false);
       const [tab, setTab] = usePersistedState(`adminpanel_${club.id}_tab`, "resumen"); // resumen | fixture | plantel | config
+
+      // Si vinimos con una fecha pre-seleccionada desde la vista pública, ir directo a fixture
+      useEffect(() => {
+        if (initialFechaId) {
+          setTab("fixture");
+        }
+      }, [initialFechaId]);
 
       const loadRequests = useCallback(async () => {
         const { data } = await sb.from("access_requests").select("*").eq("requested_club_id", club.id).eq("status", "pending").order("created_at", { ascending: false });
@@ -3851,7 +3863,9 @@
               )}
 
               {tab === "fixture" && (myRole === "owner" || myRole === "admin") && (
-                <FixtureManager club={club} session={session}/>
+                <FixtureManager club={club} session={session}
+                  initialFechaId={initialFechaId}
+                  onConsumedFechaId={onConsumedFechaId}/>
               )}
 
               {tab === "plantel" && (myRole === "owner" || myRole === "admin") && (
@@ -5747,7 +5761,7 @@
     //  FIXTURE MANAGER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function FixtureManager({ club, session }) {
+    function FixtureManager({ club, session, initialFechaId, onConsumedFechaId }) {
       const [fechas, setFechas] = useState([]);
       const [loading, setLoading] = useState(true);
       const [view, setView] = usePersistedState(`fixturemgr_${club.id}_view`, "list"); // "list" | "import" | "edit"
@@ -5765,9 +5779,22 @@
         const { data } = await sb.from("fechas").select("*").eq("club_id", club.id).order("fecha_num");
         setFechas(data || []);
         setLoading(false);
+        return data || [];
       }, [club.id]);
 
       useEffect(() => { load(); }, [load]);
+
+      // Si vinimos con una fecha pre-seleccionada desde la vista pública, abrir directo el editor
+      useEffect(() => {
+        if (!initialFechaId || loading || fechas.length === 0) return;
+        const fechaTarget = fechas.find(f => f.id === initialFechaId);
+        if (fechaTarget) {
+          setEditingFecha(fechaTarget);
+          setView("edit");
+        }
+        // Consumir la fecha para que no vuelva a dispararse si el user navega
+        if (onConsumedFechaId) onConsumedFechaId();
+      }, [initialFechaId, loading, fechas]);
 
       const handleDelete = async (id) => {
         if (!confirm("¿Eliminar esta fecha? Esto también borra todas las convocatorias asociadas.")) return;
