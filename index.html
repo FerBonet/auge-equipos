@@ -7114,11 +7114,32 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const handleSave = async () => {
         if (!data.rival.trim()) return alert("Ingresá el rival.");
         if (!data.fecha_date) return alert("Ingresá la fecha del partido.");
+
+        // Si cambió la formación en una fecha existente, las posiciones de cancha del 4-3-3
+        // pueden no ser válidas en la nueva formación (ej. LB no existe en 3-4-3).
+        // Para evitar jugadores "huérfanos", reseteamos todos los es_titular/field_pos.
+        const formacionCambio = !isNew && data.formacion !== fecha.formacion;
+        if (formacionCambio) {
+          if (!confirm(
+            `Cambiaste la formación de ${fecha.formacion} a ${data.formacion}.\n\n` +
+            `Para evitar inconsistencias, todos los jugadores convocados van a volver al banco. ` +
+            `Después vas a poder reasignarlos en la nueva formación desde la pestaña FORMACIÓN.\n\n` +
+            `¿Continuar?`
+          )) return;
+        }
+
         setSaving(true);
         const payload = { ...data, club_id: club.id };
         const { error } = isNew
           ? await sb.from("fechas").insert(payload)
           : await sb.from("fechas").update(payload).eq("id", fecha.id);
+
+        // Si cambió la formación, resetear titulares/posiciones de todos los convocados
+        if (!error && formacionCambio) {
+          await sb.from("fecha_jugadores")
+            .update({ es_titular: null, field_pos: null })
+            .eq("fecha_id", fecha.id);
+        }
 
         // Si es visitante con datos de cancha/maps, propagar a tabla global de rivales
         if (!error && data.condition === "Visitante" && data.rival.trim() && data.rival !== "LIBRE" &&
