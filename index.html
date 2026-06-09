@@ -3837,11 +3837,31 @@
       );
     }
 
+    // Placeholder genérico para secciones todavía no implementadas
+    function SeccionProximamente({ icon, titulo, descripcion, clubColor }) {
+      return (
+        <div style={{padding:"60px 16px", textAlign:"center", maxWidth:520, margin:"0 auto"}}>
+          <div style={{fontSize:64, marginBottom:20, opacity:0.4, lineHeight:1}}>{icon}</div>
+          <div style={{fontSize:11, fontFamily:"var(--mono)", letterSpacing:3, color:clubColor, marginBottom:10, fontWeight:700}}>
+            {titulo}
+          </div>
+          <div style={{fontSize:18, fontWeight:700, color:"var(--white-soft)", marginBottom:14, letterSpacing:-0.3}}>
+            Próximamente
+          </div>
+          <div style={{fontSize:13, color:"var(--white-dim)", lineHeight:1.6, maxWidth:380, margin:"0 auto"}}>
+            {descripcion}
+          </div>
+        </div>
+      );
+    }
+
     function ClubPublicView({ club, session, myRole, onOpenAdmin, onExit, isSuperAdmin, onGoSuperAdmin, impersonating }) {
       const [jugadores, setJugadores] = useState([]);
       const [fechas, setFechas] = useState([]);
       const [loading, setLoading] = useState(true);
       const [fechaActualId, setFechaActualId] = useState(null);
+      // Sección activa de la nueva navegación
+      const [seccion, setSeccion] = usePersistedState(`clubpub_${club.id}_seccion`, "campeonato");
 
       useEffect(() => {
         (async () => {
@@ -3899,6 +3919,29 @@
                 </div>
               </div>
             </div>
+
+            {/* Barra de tags de las 4 secciones */}
+            <div style={{display:"flex", gap:4, padding:"12px 16px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", overflowX:"auto"}}>
+              {[
+                { id: "plantilla",     icon: "👥", label: "PLANTILLA" },
+                { id: "campeonato",    icon: "🏆", label: "CAMPEONATO" },
+                { id: "entrenamiento", icon: "📋", label: "ENTRENAMIENTO" },
+                { id: "config",        icon: "⚙",  label: "CONFIGURACIÓN" },
+              ].map(s => (
+                <button key={s.id} onClick={() => setSeccion(s.id)} style={{
+                  flexShrink:0, padding:"10px 14px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+                  background: seccion === s.id ? `${club.theme_primary}1F` : "transparent",
+                  border:"none",
+                  borderBottom: seccion === s.id ? `2px solid ${club.theme_primary}` : "2px solid transparent",
+                  color: seccion === s.id ? club.theme_primary : "var(--white-dim)",
+                  cursor:"pointer",
+                }}>
+                  {s.icon} {s.label}
+                </button>
+              ))}
+            </div>
+
+            {seccion === "campeonato" && (
             <div style={{padding:"20px 16px"}}>
               {fechas.length === 0 ? (
                 <div style={{textAlign:"center", padding:40, background:`${club.theme_primary}08`, borderRadius:8, border:`1px dashed ${club.theme_primary}40`}}>
@@ -3923,6 +3966,22 @@
                   {fechaActual && <FechaDetalle fecha={fechaActual} club={club} jugadores={jugadores} session={session}/>}
                 </>
               )}
+            </div>
+            )}
+
+            {seccion === "plantilla" && (
+              <SeccionProximamente icon="👥" titulo="PLANTILLA" descripcion="Listado del plantel con estadísticas individuales (goles, partidos jugados, minutos, tarjetas) y datos de cada jugador." clubColor={club.theme_primary}/>
+            )}
+
+            {seccion === "entrenamiento" && (
+              <SeccionProximamente icon="📋" titulo="ENTRENAMIENTO" descripcion="Gestión del trabajo semanal del equipo: asistencia a entrenamientos, temas desarrollados, planificación de prácticas." clubColor={club.theme_primary}/>
+            )}
+
+            {seccion === "config" && (
+              <SeccionProximamente icon="⚙" titulo="CONFIGURACIÓN" descripcion="Administración de usuarios, permisos y roles del club. Por ahora esto sigue dentro del Panel Admin." clubColor={club.theme_primary}/>
+            )}
+
+            <div style={{padding:"0 16px"}}>
               <div style={{marginTop:50, paddingTop:24, borderTop:"1px solid rgba(255,255,255,0.05)", textAlign:"center", display:"flex", flexDirection:"column", gap:8, alignItems:"center"}}>
                 {isOwnerOrAdmin && (
                   <button onClick={() => onOpenAdmin(fechaActualId)} style={{background:"transparent", border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)", padding:"6px 14px", borderRadius:3, fontSize:10, fontFamily:"var(--mono)", letterSpacing:2}}>⚙ PANEL ADMIN</button>
