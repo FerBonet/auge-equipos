@@ -7396,10 +7396,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             <div style={{textAlign:"center", padding:20}}><div className="spinner" style={{margin:"0 auto"}}/></div>
           ) : tab === "convocatoria" ? (
             <ConvocatoriaTabContent
+              fecha={fecha}
+              club={club}
               jugadores={jugadoresActivos}
               convRows={convRows}
               onUpdate={updateJugador}
               convocadosCount={counts.convocados}
+              reload={load}
             />
           ) : tab === "formacion" ? (
             <FormacionTabContent
@@ -7435,7 +7438,89 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     }
 
     // ─── Tab Convocatoria: lista de jugadores con botones CONV/DUDA/BAJA ────
-    function ConvocatoriaTabContent({ jugadores, convRows, onUpdate, convocadosCount }) {
+    function ConvocatoriaTabContent({ fecha, club, jugadores, convRows, onUpdate, convocadosCount, reload }) {
+      const [copiando, setCopiando] = useState(false);
+
+      const copiarFechaAnterior = async () => {
+        if (!fecha.fecha_date) {
+          alert("Esta fecha no tiene una fecha real cargada. Editala primero para poder buscar la anterior.");
+          return;
+        }
+        setCopiando(true);
+        try {
+          // 1. Buscar la fecha inmediata anterior (por fecha_date) del mismo club
+          const { data: anteriores, error: errFecha } = await sb
+            .from("fechas")
+            .select("id, fecha_num, fecha_date, rival, formacion")
+            .eq("club_id", club.id)
+            .lt("fecha_date", fecha.fecha_date)
+            .not("fecha_date", "is", null)
+            .order("fecha_date", { ascending: false })
+            .limit(1);
+          if (errFecha) throw errFecha;
+          if (!anteriores || anteriores.length === 0) {
+            alert("No hay una fecha anterior con fecha real cargada para copiar.");
+            return;
+          }
+          const fechaAnterior = anteriores[0];
+
+          // 2. Pedir confirmación
+          if (!confirm(
+            `¿Copiar la convocatoria de la fecha anterior?\n\n` +
+            `Origen: F${fechaAnterior.fecha_num} (${fechaAnterior.fecha_date}) · ${fechaAnterior.rival}\n` +
+            `Destino: F${fecha.fecha_num} · ${fecha.rival}\n\n` +
+            `Se va a pisar TODO lo que tengas cargado en esta fecha:\n` +
+            `  • Estados (CONV/DUDA/BAJA) y motivos\n` +
+            `  • Formación (${fechaAnterior.formacion || "—"})\n` +
+            `  • Posiciones de cancha (titulares y banco)\n\n` +
+            `Esta acción no se puede deshacer.`
+          )) return;
+
+          // 3. Traer los fecha_jugadores de la fecha anterior
+          const { data: rowsAnteriores, error: errRows } = await sb
+            .from("fecha_jugadores")
+            .select("jugador_id, status, motivo, es_titular, field_pos")
+            .eq("fecha_id", fechaAnterior.id);
+          if (errRows) throw errRows;
+
+          // 4. Actualizar la formación de la fecha actual (si la anterior tiene una)
+          if (fechaAnterior.formacion) {
+            await sb.from("fechas")
+              .update({ formacion: fechaAnterior.formacion })
+              .eq("id", fecha.id);
+          }
+
+          // 5. Borrar todos los fecha_jugadores actuales y recrearlos con los datos copiados
+          await sb.from("fecha_jugadores").delete().eq("fecha_id", fecha.id);
+
+          if (rowsAnteriores && rowsAnteriores.length > 0) {
+            // Solo copiar los jugadores que siguen activos en el plantel actual
+            const idsActivos = new Set(jugadores.map(j => j.id));
+            const payload = rowsAnteriores
+              .filter(r => idsActivos.has(r.jugador_id))
+              .map(r => ({
+                fecha_id: fecha.id,
+                jugador_id: r.jugador_id,
+                status: r.status,
+                motivo: r.motivo,
+                es_titular: r.es_titular,
+                field_pos: r.field_pos,
+              }));
+            if (payload.length > 0) {
+              const { error: errInsert } = await sb.from("fecha_jugadores").insert(payload);
+              if (errInsert) throw errInsert;
+            }
+          }
+
+          alert(`✓ Convocatoria copiada de F${fechaAnterior.fecha_num}.`);
+          if (reload) await reload();
+        } catch (e) {
+          alert("Error al copiar: " + e.message);
+        } finally {
+          setCopiando(false);
+        }
+      };
+
       if (jugadores.length === 0) {
         return (
           <div style={{padding:24, textAlign:"center", background:"rgba(255,255,255,0.02)", borderRadius:6, fontSize:12, color:"var(--white-dim)"}}>
@@ -7445,6 +7530,15 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       }
       return (
         <div style={{display:"flex", flexDirection:"column", gap:8}}>
+          {/* Botón copiar de fecha anterior */}
+          <button onClick={copiarFechaAnterior} disabled={copiando} style={{
+            padding:"8px 12px", fontSize:11, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+            background:"rgba(255,255,255,0.03)", border:"1px dashed rgba(255,255,255,0.18)",
+            color:"var(--white-soft)", borderRadius:6, cursor: copiando ? "wait" : "pointer",
+            marginBottom:4
+          }}>
+            {copiando ? "Copiando..." : "📎 Copiar convocatoria de la fecha anterior"}
+          </button>
           {jugadores.map(j => {
             const row = convRows.find(r => r.jugador_id === j.id);
             return <ConvocatoriaJugadorRow key={j.id} jugador={j} row={row} onUpdate={(updates) => onUpdate(j.id, updates)} convocadosCount={convocadosCount}/>;
