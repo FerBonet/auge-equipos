@@ -4257,13 +4257,13 @@
     // ═══════════════════════════════════════════════════════════════════════════
     //  SECCIÓN ENTRENAMIENTO · Asistencia + Planificación + Agenda
     // ═══════════════════════════════════════════════════════════════════════════
-
-    const ASISTENCIA_ESTADOS = [
-      { value: "presente",    label: "Presente",    icon: "✓", color: "var(--green)" },
-      { value: "ausente",     label: "Ausente",     icon: "✗", color: "var(--red)" },
-      { value: "justificado", label: "Justificado", icon: "⚠",  color: "var(--orange)" },
-      { value: "lesionado",   label: "Lesionado",   icon: "🤕", color: "var(--orange)" },
-      { value: "estudio",     label: "Estudio",     icon: "📚", color: "var(--plat)" },
+    // Motivos para una ausencia
+    const ASISTENCIA_MOTIVOS = [
+      { value: "lesion",     label: "Lesión",     icon: "🤕" },
+      { value: "viaje",      label: "Viaje",      icon: "✈️" },
+      { value: "enfermedad", label: "Enfermedad", icon: "🤒" },
+      { value: "estudio",    label: "Estudio",    icon: "📚" },
+      { value: "otros",      label: "Otros",      icon: "•" },
     ];
 
     function EntrenamientoSection({ club, session, jugadores, myRole }) {
@@ -4304,177 +4304,372 @@
       );
     }
 
+    // ─── Helper de fechas ────────────────────────────────────────────────────
+    function fechaToISO(d) {
+      // d = Date object → "YYYY-MM-DD"
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    function isoToFecha(iso) {
+      // "YYYY-MM-DD" → Date (mediodía local para evitar problemas de zona horaria)
+      return new Date(iso + "T12:00:00");
+    }
+    function formatFechaLarga(iso) {
+      const d = isoToFecha(iso);
+      return d.toLocaleDateString("es-AR", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+    }
+    function addDias(iso, n) {
+      const d = isoToFecha(iso);
+      d.setDate(d.getDate() + n);
+      return fechaToISO(d);
+    }
+
     // ─── SUB-TAB ASISTENCIA ──────────────────────────────────────────────────
     function AsistenciaSubtab({ club, session, jugadores, isAdmin }) {
-      const [entrenamientos, setEntrenamientos] = useState([]);
+      const hoyISO = fechaToISO(new Date());
+      const [fechaSel, setFechaSel] = useState(hoyISO);
+      const [entrenamientos, setEntrenamientos] = useState([]); // todos los del club
+      const [asistenciaDelDia, setAsistenciaDelDia] = useState({}); // { jugador_id: { estado, motivo, nota } }
       const [loading, setLoading] = useState(true);
-      const [entrenamientoActivo, setEntrenamientoActivo] = useState(null); // si estás editando uno
-      const [verMas, setVerMas] = useState(false); // listar más de 10
-      const [hoyToggle, setHoyToggle] = useState(false); // checkbox "Hoy se entrena"
+      const [savingEstado, setSavingEstado] = useState({}); // { jugador_id: true } durante el save
+      const [verMas, setVerMas] = useState(false);
+      const [motivoOpenFor, setMotivoOpenFor] = useState(null); // jugador_id con su panel de motivos abierto
 
-      const hoy = new Date().toISOString().slice(0, 10);
-      const jugadoresActivos = jugadores.filter(j => j.estado === "activo");
+      const jugadoresActivos = jugadores.filter(j => j.estado === "activo")
+        .sort((a, b) => (a.numero || 999) - (b.numero || 999));
 
-      const load = async () => {
-        setLoading(true);
+      // Entrenamiento del día seleccionado (si existe)
+      const entDelDia = entrenamientos.find(e => e.fecha === fechaSel);
+      const hayEntrenamiento = !!entDelDia;
+
+      // ─── Cargar todos los entrenamientos del club ───────────────────────
+      const loadEntrenamientos = async () => {
         const { data } = await sb.from("entrenamientos")
           .select("*")
           .eq("club_id", club.id)
           .order("fecha", { ascending: false });
         setEntrenamientos(data || []);
-        setLoading(false);
       };
 
-      useEffect(() => { load(); }, [club.id]);
-
-      // ─── Crear / abrir entrenamiento de hoy ──────────────────────────────
-      const arrancarHoy = async () => {
-        // Buscar si hay entrenamiento de hoy
-        const hoyEnt = entrenamientos.find(e => e.fecha === hoy);
-        if (hoyEnt) {
-          const opt = confirm(
-            `Ya hay un entrenamiento cargado hoy (${hoy}).\n\n` +
-            `Aceptar = Editar el existente.\n` +
-            `Cancelar = Crear otro nuevo (más raro, ej. doble turno).`
-          );
-          if (opt) {
-            // Editar
-            await abrirEntrenamiento(hoyEnt);
-            return;
-          }
-          // si dice cancelar, crear nuevo
-        }
-        await crearEntrenamiento(hoy);
-      };
-
-      const crearEntrenamiento = async (fecha) => {
-        // 1. Crear el entrenamiento
-        const { data: nuevo, error } = await sb.from("entrenamientos")
-          .insert({
-            club_id: club.id,
-            fecha,
-            created_by: session?.user?.email,
-          })
-          .select()
-          .single();
-        if (error) { alert("Error: " + error.message); return; }
-
-        // 2. Crear asistencia "presente" para todos los activos
-        if (jugadoresActivos.length > 0) {
-          const payload = jugadoresActivos.map(j => ({
-            entrenamiento_id: nuevo.id,
-            jugador_id: j.id,
-            estado: "presente",
-          }));
-          await sb.from("asistencia_entrenamiento").insert(payload);
-        }
-
-        // 3. Cargar el entrenamiento recién creado
-        await load();
-        await abrirEntrenamiento(nuevo);
-      };
-
-      const abrirEntrenamiento = async (ent) => {
-        // Traer asistencia actual del entrenamiento
-        const { data: filas } = await sb.from("asistencia_entrenamiento")
-          .select("*")
-          .eq("entrenamiento_id", ent.id);
-        // Construir mapa { jugador_id: { estado, nota } } incluyendo todos los activos
+      // ─── Cargar asistencia del día seleccionado ──────────────────────────
+      const loadAsistencia = async (entId) => {
         const map = {};
         for (const j of jugadoresActivos) {
-          map[j.id] = { estado: "presente", nota: "" };
+          map[j.id] = { estado: "presente", motivo: null, nota: "" };
         }
-        for (const f of filas || []) {
-          map[f.jugador_id] = { estado: f.estado, nota: f.nota || "" };
+        if (entId) {
+          const { data } = await sb.from("asistencia_entrenamiento")
+            .select("*")
+            .eq("entrenamiento_id", entId);
+          for (const f of data || []) {
+            map[f.jugador_id] = {
+              estado: f.estado,
+              motivo: f.estado === "ausente" ? (f.nota || "otros") : null,
+              nota: "",
+            };
+          }
         }
-        setEntrenamientoActivo({ ...ent, asistencia: map });
+        setAsistenciaDelDia(map);
       };
 
-      const borrarEntrenamiento = async (ent) => {
-        if (!confirm(`¿Eliminar el entrenamiento del ${ent.fecha}? Se pierde toda la asistencia cargada.`)) return;
-        await sb.from("entrenamientos").delete().eq("id", ent.id);
-        await load();
+      // ─── Init ────────────────────────────────────────────────────────────
+      useEffect(() => {
+        (async () => {
+          setLoading(true);
+          await loadEntrenamientos();
+          setLoading(false);
+        })();
+      }, [club.id]);
+
+      // Cuando cambia la fecha seleccionada o los entrenamientos, recargar asistencia del día
+      useEffect(() => {
+        const ent = entrenamientos.find(e => e.fecha === fechaSel);
+        loadAsistencia(ent?.id);
+        setMotivoOpenFor(null);
+      }, [fechaSel, entrenamientos.length]);
+
+      // ─── Toggle "Hoy se entrena" (crea o borra el entrenamiento) ────────
+      const toggleEntrenamiento = async () => {
+        if (!isAdmin) return;
+        if (hayEntrenamiento) {
+          // Borrar (con confirmación si tiene ausencias cargadas)
+          const { data: filas } = await sb.from("asistencia_entrenamiento")
+            .select("estado").eq("entrenamiento_id", entDelDia.id).neq("estado", "presente");
+          if (filas && filas.length > 0) {
+            if (!confirm(`Este entrenamiento tiene ${filas.length} ausencia(s) cargada(s). ¿Eliminarlo igual?`)) return;
+          }
+          await sb.from("entrenamientos").delete().eq("id", entDelDia.id);
+        } else {
+          // Crear
+          await sb.from("entrenamientos").insert({
+            club_id: club.id,
+            fecha: fechaSel,
+            created_by: session?.user?.email,
+          });
+        }
+        await loadEntrenamientos();
       };
 
-      // ─── Render: si estás editando un entrenamiento ───────────────────────
-      if (entrenamientoActivo) {
-        return (
-          <AsistenciaEditor
-            club={club}
-            session={session}
-            entrenamiento={entrenamientoActivo}
-            jugadores={jugadoresActivos}
-            onSave={async () => { setEntrenamientoActivo(null); await load(); }}
-            onCancel={() => setEntrenamientoActivo(null)}
-          />
-        );
+      // ─── Cambiar estado de un jugador en el día actual ──────────────────
+      const setEstado = async (jugadorId, estado, motivo) => {
+        if (!isAdmin || !hayEntrenamiento) return;
+        setSavingEstado(s => ({ ...s, [jugadorId]: true }));
+        // Actualizar UI optimista
+        setAsistenciaDelDia(a => ({
+          ...a,
+          [jugadorId]: { estado, motivo: estado === "ausente" ? (motivo || "otros") : null, nota: "" }
+        }));
+        // Persistir en DB
+        const payload = {
+          entrenamiento_id: entDelDia.id,
+          jugador_id: jugadorId,
+          estado,
+          nota: estado === "ausente" ? (motivo || "otros") : null,
+        };
+        // Borrar fila existente si hay, e insertar
+        await sb.from("asistencia_entrenamiento")
+          .delete()
+          .eq("entrenamiento_id", entDelDia.id)
+          .eq("jugador_id", jugadorId);
+        if (estado !== "presente") {
+          await sb.from("asistencia_entrenamiento").insert(payload);
+        }
+        setSavingEstado(s => { const c = { ...s }; delete c[jugadorId]; return c; });
+        setMotivoOpenFor(null);
+      };
+
+      // ─── Render ──────────────────────────────────────────────────────────
+      if (loading) return <Spinner/>;
+
+      // Mapa fecha → entrenamiento (para marcar visualmente en el navegador)
+      const tieneEntDia = (iso) => entrenamientos.some(e => e.fecha === iso);
+
+      // Ventana de 7 días alrededor del seleccionado para indicador visual
+      const diasContexto = [-3, -2, -1, 0, 1, 2, 3].map(o => addDias(fechaSel, o));
+
+      // Conteo de ausencias del día (para resumen)
+      const counts = { presente:0, ausente:0 };
+      const motivos = { lesion:0, viaje:0, enfermedad:0, estudio:0, otros:0 };
+      if (hayEntrenamiento) {
+        for (const j of jugadoresActivos) {
+          const a = asistenciaDelDia[j.id] || { estado:"presente" };
+          counts[a.estado] = (counts[a.estado] || 0) + 1;
+          if (a.estado === "ausente" && a.motivo) motivos[a.motivo] = (motivos[a.motivo] || 0) + 1;
+        }
       }
 
-      // ─── Render: lista principal ──────────────────────────────────────────
+      // Histórico: últimos 10 entrenamientos
       const visibles = verMas ? entrenamientos : entrenamientos.slice(0, 10);
 
       return (
         <div>
-          {/* Bloque "Hoy se entrena" (solo admin) */}
-          {isAdmin && (
+          {/* ── Navegador de fecha ─────────────────────────────────────── */}
+          <div style={{
+            display:"flex", alignItems:"center", gap:8, marginBottom:12,
+            padding:"10px 12px", background:"rgba(255,255,255,0.02)",
+            border:"1px solid rgba(255,255,255,0.06)", borderRadius:6
+          }}>
+            <button onClick={() => setFechaSel(addDias(fechaSel, -1))} style={navArrow}>‹</button>
+            <div style={{flex:1, textAlign:"center"}}>
+              <div style={{fontSize:13, fontWeight:700, color:"var(--white)", textTransform:"capitalize", lineHeight:1.2}}>
+                {formatFechaLarga(fechaSel)}
+              </div>
+              {fechaSel === hoyISO && (
+                <div style={{fontSize:9, fontFamily:"var(--mono)", color:club.theme_primary, letterSpacing:1.5, marginTop:3, fontWeight:700}}>HOY</div>
+              )}
+            </div>
+            <button onClick={() => setFechaSel(addDias(fechaSel, 1))} style={navArrow}>›</button>
+          </div>
+
+          {/* Mini-indicador de días con asistencia cargada (contexto -3 a +3) */}
+          <div style={{display:"flex", justifyContent:"center", gap:4, marginBottom:14}}>
+            {diasContexto.map(iso => {
+              const tiene = tieneEntDia(iso);
+              const esActual = iso === fechaSel;
+              const esHoy = iso === hoyISO;
+              const d = isoToFecha(iso);
+              return (
+                <button key={iso} onClick={() => setFechaSel(iso)} style={{
+                  padding:"4px 8px", fontSize:9, fontFamily:"var(--mono)",
+                  background: esActual ? `${club.theme_primary}33` : "transparent",
+                  color: esActual ? club.theme_primary : (tiene ? "var(--white-soft)" : "var(--white-dim)"),
+                  border: `1px solid ${esActual ? club.theme_primary : (tiene ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.04)")}`,
+                  borderRadius:3, cursor:"pointer", position:"relative",
+                  fontWeight: esActual || esHoy ? 700 : 400, letterSpacing:0.5
+                }}>
+                  {d.toLocaleDateString("es-AR", { weekday:"short" }).slice(0,3)}
+                  <div style={{fontSize:11, marginTop:1, fontWeight:700}}>{d.getDate()}</div>
+                  {tiene && (
+                    <span style={{
+                      position:"absolute", bottom:1, left:"50%", transform:"translateX(-50%)",
+                      width:4, height:4, background: club.theme_primary, borderRadius:"50%"
+                    }}/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── Toggle "Hoy se entrena" / "Este día entrenó" ─────────────── */}
+          {isAdmin ? (
             <div style={{
-              padding:14, background:`${club.theme_primary}0F`, border:`1px solid ${club.theme_primary}40`,
-              borderRadius:6, marginBottom:14
+              padding:"10px 14px", marginBottom:14,
+              background: hayEntrenamiento ? `${club.theme_primary}1F` : "rgba(255,255,255,0.02)",
+              border: `1px solid ${hayEntrenamiento ? club.theme_primary + "66" : "rgba(255,255,255,0.08)"}`,
+              borderRadius:6
             }}>
-              <label style={{display:"flex", alignItems:"center", gap:10, cursor:"pointer", marginBottom: hoyToggle ? 12 : 0}}>
-                <input type="checkbox" checked={hoyToggle} onChange={e => setHoyToggle(e.target.checked)} style={{width:18, height:18}}/>
+              <label style={{display:"flex", alignItems:"center", gap:10, cursor:"pointer"}}>
+                <input type="checkbox" checked={hayEntrenamiento} onChange={toggleEntrenamiento} style={{width:18, height:18, cursor:"pointer"}}/>
                 <div>
-                  <div style={{fontSize:13, fontWeight:700, color:"var(--white)"}}>Hoy se entrena</div>
-                  <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2, fontFamily:"var(--mono)"}}>{hoy}</div>
+                  <div style={{fontSize:13, fontWeight:700, color:"var(--white)"}}>
+                    {fechaSel === hoyISO ? "Hoy se entrena" : "Este día se entrenó"}
+                  </div>
+                  <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2}}>
+                    {hayEntrenamiento ? "Marcá las ausencias abajo" : "Tildá para registrar la asistencia"}
+                  </div>
                 </div>
               </label>
-              {hoyToggle && (
-                <button onClick={arrancarHoy} style={{
-                  width:"100%", padding:"10px", fontSize:12, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1.5,
-                  background:club.theme_primary, color:"var(--bg)", border:"none", borderRadius:6, cursor:"pointer"
-                }}>
-                  ✓ TOMAR ASISTENCIA DE HOY
-                </button>
-              )}
+            </div>
+          ) : (
+            <div style={{
+              padding:"10px 14px", marginBottom:14, textAlign:"center",
+              background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:6,
+              fontSize:11, color:"var(--white-dim)"
+            }}>
+              {hayEntrenamiento ? "Este día se entrenó" : "Este día no hubo entrenamiento"}
             </div>
           )}
 
-          {/* Botón para cargar un entrenamiento de otro día (solo admin) */}
-          {isAdmin && (
-            <CargarFechaPasada onCargar={crearEntrenamiento} entrenamientos={entrenamientos} club={club}/>
+          {/* ── Resumen del día (si hubo entrenamiento) ──────────────────── */}
+          {hayEntrenamiento && (
+            <div style={{
+              display:"flex", gap:14, justifyContent:"center", marginBottom:14,
+              padding:"10px", background:"rgba(255,255,255,0.02)", borderRadius:6,
+              fontSize:11, fontFamily:"var(--mono)", fontWeight:700, flexWrap:"wrap"
+            }}>
+              <span style={{color:"var(--green)"}}>✓ {counts.presente} PRES</span>
+              {counts.ausente > 0 && <span style={{color:"var(--red)"}}>✗ {counts.ausente} AUS</span>}
+              {motivos.lesion > 0 && <span style={{color:"var(--white-soft)"}}>🤕 {motivos.lesion}</span>}
+              {motivos.viaje > 0 && <span style={{color:"var(--white-soft)"}}>✈ {motivos.viaje}</span>}
+              {motivos.enfermedad > 0 && <span style={{color:"var(--white-soft)"}}>🤒 {motivos.enfermedad}</span>}
+              {motivos.estudio > 0 && <span style={{color:"var(--white-soft)"}}>📚 {motivos.estudio}</span>}
+              {motivos.otros > 0 && <span style={{color:"var(--white-soft)"}}>• {motivos.otros}</span>}
+            </div>
           )}
 
-          {/* Lista histórica */}
-          <div style={{fontSize:10, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", fontWeight:700, marginBottom:8}}>
+          {/* ── Lista de jugadoras ───────────────────────────────────────── */}
+          {jugadoresActivos.length === 0 ? (
+            <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12}}>
+              No hay jugadoras activas en el plantel.
+            </div>
+          ) : (
+            <div style={{display:"flex", flexDirection:"column", gap:6, marginBottom:18, opacity: hayEntrenamiento ? 1 : 0.4, pointerEvents: hayEntrenamiento && isAdmin ? "auto" : "none"}}>
+              {jugadoresActivos.map(j => {
+                const a = asistenciaDelDia[j.id] || { estado:"presente", motivo:null };
+                const isAusente = a.estado === "ausente";
+                const motivoInfo = isAusente ? ASISTENCIA_MOTIVOS.find(m => m.value === a.motivo) : null;
+                const posShort = getPositionShort(j.posicion);
+                const lineColor = getPositionColor(j.posicion);
+                const motivoOpen = motivoOpenFor === j.id;
+                const saving = savingEstado[j.id];
+                return (
+                  <div key={j.id} style={{
+                    background:"rgba(255,255,255,0.02)",
+                    border:`1px solid ${isAusente ? "var(--red)40" : "rgba(255,255,255,0.05)"}`,
+                    borderLeft: isAusente ? `3px solid var(--red)` : "3px solid transparent",
+                    borderRadius:4
+                  }}>
+                    <div style={{display:"flex", alignItems:"center", gap:8, padding:"8px 10px"}}>
+                      {posShort && (
+                        <span style={{
+                          minWidth:30, padding:"2px 5px", fontSize:9, fontWeight:900,
+                          fontFamily:"var(--mono)", color:"var(--bg)", background:lineColor, borderRadius:2, textAlign:"center", flexShrink:0
+                        }}>{posShort}</span>
+                      )}
+                      <div style={{flex:1, minWidth:0, fontSize:13, fontWeight:600}}>
+                        {j.numero && <span style={{color:club.theme_primary, fontFamily:"var(--mono)", marginRight:6}}>#{j.numero}</span>}
+                        {j.nombre}
+                      </div>
+                      {/* Pill de estado */}
+                      {saving ? (
+                        <span style={{fontSize:10, color:"var(--white-dim)", fontStyle:"italic"}}>Guardando…</span>
+                      ) : !isAusente ? (
+                        <button onClick={() => setEstado(j.id, "ausente", "otros")} style={{
+                          padding:"5px 10px", fontSize:10, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                          background:"var(--green)1F", border:"1px solid var(--green)40",
+                          color:"var(--green)", borderRadius:3, cursor:"pointer"
+                        }}>
+                          ✓ PRESENTE
+                        </button>
+                      ) : (
+                        <button onClick={() => setMotivoOpenFor(motivoOpen ? null : j.id)} style={{
+                          padding:"5px 10px", fontSize:10, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                          background:"rgba(232,85,85,0.15)", border:"1px solid var(--red)",
+                          color:"var(--red)", borderRadius:3, cursor:"pointer", display:"flex", alignItems:"center", gap:4
+                        }}>
+                          ✗ {motivoInfo ? `${motivoInfo.icon} ${motivoInfo.label.toUpperCase()}` : "AUSENTE"}
+                        </button>
+                      )}
+                      {isAusente && !saving && (
+                        <button onClick={() => setEstado(j.id, "presente")} title="Marcar como presente" style={{
+                          padding:"5px 8px", fontSize:10, background:"transparent",
+                          border:"1px solid rgba(255,255,255,0.10)", color:"var(--white-dim)",
+                          borderRadius:3, cursor:"pointer"
+                        }}>↩</button>
+                      )}
+                    </div>
+                    {/* Panel de motivos */}
+                    {motivoOpen && (
+                      <div style={{
+                        padding:"8px 10px 10px", borderTop:"1px solid rgba(255,255,255,0.05)",
+                        display:"flex", flexWrap:"wrap", gap:4
+                      }}>
+                        {ASISTENCIA_MOTIVOS.map(m => {
+                          const active = a.motivo === m.value;
+                          return (
+                            <button key={m.value} onClick={() => setEstado(j.id, "ausente", m.value)} style={{
+                              padding:"5px 9px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:0.5, fontWeight:700,
+                              background: active ? "var(--red)" : "rgba(232,85,85,0.10)",
+                              color: active ? "var(--bg)" : "var(--red)",
+                              border:"1px solid var(--red)40",
+                              borderRadius:3, cursor:"pointer"
+                            }}>
+                              {m.icon} {m.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Histórico de los últimos 10 entrenamientos ──────────────── */}
+          <div style={{fontSize:10, fontFamily:"var(--mono)", letterSpacing:2, color:"var(--white-dim)", fontWeight:700, marginBottom:8, marginTop:18}}>
             📋 HISTÓRICO DE ENTRENAMIENTOS
           </div>
-          {loading ? <Spinner/> : entrenamientos.length === 0 ? (
-            <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12, background:"rgba(255,255,255,0.02)", borderRadius:6}}>
-              Todavía no hay entrenamientos cargados.<br/>
-              {isAdmin ? "Tildá \"Hoy se entrena\" para tomar la primera asistencia." : ""}
+          {entrenamientos.length === 0 ? (
+            <div style={{padding:20, textAlign:"center", color:"var(--white-dim)", fontSize:11, background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+              Sin entrenamientos cargados todavía.
             </div>
           ) : (
             <>
-              <div style={{display:"flex", flexDirection:"column", gap:6}}>
+              <div style={{display:"flex", flexDirection:"column", gap:4}}>
                 {visibles.map(ent => (
-                  <EntrenamientoCardResumen
-                    key={ent.id}
-                    entrenamiento={ent}
-                    club={club}
-                    jugadoresActivos={jugadoresActivos}
-                    isAdmin={isAdmin}
-                    onClick={() => abrirEntrenamiento(ent)}
-                    onBorrar={() => borrarEntrenamiento(ent)}
-                  />
+                  <HistoricoCard key={ent.id} entrenamiento={ent} club={club} esActual={ent.fecha === fechaSel} onClick={() => setFechaSel(ent.fecha)}/>
                 ))}
               </div>
               {entrenamientos.length > 10 && !verMas && (
                 <button onClick={() => setVerMas(true)} style={{
-                  marginTop:10, width:"100%", padding:"8px", fontSize:11, fontFamily:"var(--mono)", letterSpacing:1.5,
+                  marginTop:8, width:"100%", padding:"6px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5,
                   background:"transparent", border:"1px dashed rgba(255,255,255,0.15)",
                   color:"var(--white-dim)", borderRadius:6, cursor:"pointer"
                 }}>
-                  Ver más ({entrenamientos.length - 10} entrenamientos)
+                  Ver más ({entrenamientos.length - 10})
                 </button>
               )}
             </>
@@ -4483,293 +4678,57 @@
       );
     }
 
-    // ─── Sub-componente: cargar entrenamiento de un día pasado ─────────────
-    function CargarFechaPasada({ onCargar, entrenamientos, club }) {
-      const [abierto, setAbierto] = useState(false);
-      const [fechaSel, setFechaSel] = useState("");
-      const hoy = new Date().toISOString().slice(0, 10);
+    // Estilo de las flechas de navegación
+    const navArrow = {
+      width:32, height:32, fontSize:20, lineHeight:1,
+      background:"transparent", border:"1px solid rgba(255,255,255,0.10)",
+      color:"var(--white)", borderRadius:4, cursor:"pointer", fontWeight:700,
+      display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0
+    };
 
-      const handleCargar = async () => {
-        if (!fechaSel) return alert("Elegí una fecha.");
-        if (fechaSel > hoy) return alert("No podés cargar entrenamientos del futuro.");
-        // Chequear si ya existe
-        const existente = entrenamientos.find(e => e.fecha === fechaSel);
-        if (existente) {
-          if (!confirm(`Ya hay un entrenamiento cargado el ${fechaSel}. ¿Crear otro igual?`)) return;
-        }
-        await onCargar(fechaSel);
-        setAbierto(false);
-        setFechaSel("");
-      };
-
-      if (!abierto) {
-        return (
-          <button onClick={() => setAbierto(true)} style={{
-            width:"100%", padding:"8px 12px", fontSize:11, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
-            background:"rgba(255,255,255,0.03)", border:"1px dashed rgba(255,255,255,0.15)",
-            color:"var(--white-dim)", borderRadius:6, cursor:"pointer", marginBottom:14
-          }}>
-            📅 Cargar entrenamiento de otro día
-          </button>
-        );
-      }
-
-      return (
-        <div style={{padding:12, background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.10)", borderRadius:6, marginBottom:14}}>
-          <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:8}}>Elegí la fecha del entrenamiento</div>
-          <input type="date" value={fechaSel} onChange={e => setFechaSel(e.target.value)} max={hoy} style={{...inputStyle, marginBottom:8}}/>
-          <div style={{display:"flex", gap:6}}>
-            <button onClick={handleCargar} style={{...btnPrimary, flex:1, padding:"8px", fontSize:11}}>Crear</button>
-            <button onClick={() => { setAbierto(false); setFechaSel(""); }} style={{...btnGhost, padding:"8px 12px", fontSize:11}}>Cancelar</button>
-          </div>
-        </div>
-      );
-    }
-
-    // ─── Card resumen de un entrenamiento (en la lista histórica) ───────────
-    function EntrenamientoCardResumen({ entrenamiento, club, jugadoresActivos, isAdmin, onClick, onBorrar }) {
+    // ─── Card resumen de un entrenamiento (histórico, clickeable) ───────────
+    function HistoricoCard({ entrenamiento, club, esActual, onClick }) {
       const [stats, setStats] = useState(null);
 
       useEffect(() => {
         (async () => {
           const { data } = await sb.from("asistencia_entrenamiento")
-            .select("estado")
+            .select("estado, nota")
             .eq("entrenamiento_id", entrenamiento.id);
-          const counts = { presente:0, ausente:0, justificado:0, lesionado:0, estudio:0 };
+          const counts = { presente:0, ausente:0 };
           for (const r of data || []) counts[r.estado] = (counts[r.estado] || 0) + 1;
-          const total = (data || []).length;
-          setStats({ counts, total });
+          setStats({ counts, total: (data || []).length });
         })();
       }, [entrenamiento.id]);
 
-      const fechaStr = (() => {
-        const d = new Date(entrenamiento.fecha + "T12:00:00");
-        return d.toLocaleDateString("es-AR", { weekday:"short", day:"numeric", month:"short" });
-      })();
+      const d = isoToFecha(entrenamiento.fecha);
+      const fechaStr = d.toLocaleDateString("es-AR", { weekday:"short", day:"numeric", month:"short" });
 
       return (
-        <div style={{
-          padding:"10px 12px", background:"rgba(255,255,255,0.02)",
-          border:"1px solid rgba(255,255,255,0.05)", borderRadius:6,
-          display:"flex", alignItems:"center", gap:10, cursor:"pointer",
-          transition:"background 0.15s ease"
-        }}
-          onClick={onClick}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}>
+        <button onClick={onClick} style={{
+          padding:"8px 12px", background: esActual ? `${club.theme_primary}1F` : "rgba(255,255,255,0.02)",
+          border: `1px solid ${esActual ? club.theme_primary + "66" : "rgba(255,255,255,0.05)"}`,
+          borderRadius:4, display:"flex", alignItems:"center", gap:10,
+          cursor:"pointer", textAlign:"left", width:"100%", fontFamily:"inherit"
+        }}>
           <div style={{flex:1, minWidth:0}}>
-            <div style={{fontSize:12, fontWeight:700, color:"var(--white)", textTransform:"capitalize"}}>
+            <div style={{fontSize:11, fontWeight:700, color: esActual ? club.theme_primary : "var(--white)", textTransform:"capitalize"}}>
               {fechaStr}
             </div>
             {entrenamiento.titulo && (
-              <div style={{fontSize:10, color:"var(--white-dim)", marginTop:2}}>{entrenamiento.titulo}</div>
+              <div style={{fontSize:9, color:"var(--white-dim)", marginTop:1}}>{entrenamiento.titulo}</div>
             )}
           </div>
           {stats && (
-            <div style={{display:"flex", gap:8, fontSize:11, fontFamily:"var(--mono)", fontWeight:700}}>
-              <span style={{color:"var(--green)"}} title="Presentes">✓ {stats.counts.presente}</span>
-              {stats.counts.ausente > 0 && <span style={{color:"var(--red)"}} title="Ausentes">✗ {stats.counts.ausente}</span>}
-              {stats.counts.justificado > 0 && <span style={{color:"var(--orange)"}} title="Justificados">⚠ {stats.counts.justificado}</span>}
-              {stats.counts.lesionado > 0 && <span style={{color:"var(--orange)"}} title="Lesionados">🤕 {stats.counts.lesionado}</span>}
-              {stats.counts.estudio > 0 && <span style={{color:"var(--plat)"}} title="Estudio">📚 {stats.counts.estudio}</span>}
+            <div style={{display:"flex", gap:8, fontSize:10, fontFamily:"var(--mono)", fontWeight:700}}>
+              <span style={{color:"var(--green)"}}>✓ {stats.counts.presente}</span>
+              {stats.counts.ausente > 0 && <span style={{color:"var(--red)"}}>✗ {stats.counts.ausente}</span>}
             </div>
           )}
-          {isAdmin && (
-            <button onClick={(e) => { e.stopPropagation(); onBorrar(); }} style={{
-              padding:"3px 8px", fontSize:10, background:"transparent",
-              border:"1px solid rgba(232,85,85,0.25)", color:"var(--red)",
-              borderRadius:3, cursor:"pointer", fontFamily:"var(--mono)"
-            }}>🗑</button>
-          )}
-        </div>
+        </button>
       );
     }
 
-    // ─── Editor de asistencia (toma o edición) ───────────────────────────────
-    function AsistenciaEditor({ club, session, entrenamiento, jugadores, onSave, onCancel }) {
-      const [asistencia, setAsistencia] = useState(entrenamiento.asistencia || {});
-      const [titulo, setTitulo] = useState(entrenamiento.titulo || "");
-      const [notas, setNotas] = useState(entrenamiento.notas || "");
-      const [saving, setSaving] = useState(false);
-      const [editingNoteFor, setEditingNoteFor] = useState(null); // jugador_id
-
-      const fechaStr = (() => {
-        const d = new Date(entrenamiento.fecha + "T12:00:00");
-        return d.toLocaleDateString("es-AR", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
-      })();
-
-      const setEstadoJugador = (jugadorId, estado) => {
-        setAsistencia(a => ({ ...a, [jugadorId]: { ...(a[jugadorId] || { nota: "" }), estado } }));
-      };
-
-      const setNotaJugador = (jugadorId, nota) => {
-        setAsistencia(a => ({ ...a, [jugadorId]: { ...(a[jugadorId] || { estado: "presente" }), nota } }));
-      };
-
-      const handleSave = async () => {
-        setSaving(true);
-        // Update título / notas del entrenamiento
-        await sb.from("entrenamientos")
-          .update({ titulo: titulo.trim() || null, notas: notas.trim() || null })
-          .eq("id", entrenamiento.id);
-        // Upsert de asistencia: borrar y reinsertar todo (más simple y consistente)
-        await sb.from("asistencia_entrenamiento").delete().eq("entrenamiento_id", entrenamiento.id);
-        const payload = jugadores.map(j => {
-          const a = asistencia[j.id] || { estado: "presente", nota: "" };
-          return {
-            entrenamiento_id: entrenamiento.id,
-            jugador_id: j.id,
-            estado: a.estado || "presente",
-            nota: a.nota?.trim() || null,
-          };
-        });
-        if (payload.length > 0) {
-          const { error } = await sb.from("asistencia_entrenamiento").insert(payload);
-          if (error) { setSaving(false); alert("Error: " + error.message); return; }
-        }
-        setSaving(false);
-        onSave();
-      };
-
-      // Contar por estado
-      const counts = { presente:0, ausente:0, justificado:0, lesionado:0, estudio:0 };
-      for (const j of jugadores) {
-        const e = asistencia[j.id]?.estado || "presente";
-        counts[e] = (counts[e] || 0) + 1;
-      }
-
-      return (
-        <div>
-          {/* Encabezado */}
-          <div style={{
-            padding:14, background:"rgba(255,255,255,0.02)", borderRadius:6, marginBottom:14
-          }}>
-            <div style={{fontSize:11, fontFamily:"var(--mono)", letterSpacing:2, color:club.theme_primary, fontWeight:700, marginBottom:4}}>
-              ✅ ASISTENCIA
-            </div>
-            <div style={{fontSize:15, fontWeight:700, color:"var(--white)", textTransform:"capitalize"}}>
-              {fechaStr}
-            </div>
-          </div>
-
-          {/* Título y notas */}
-          <div style={{marginBottom:14}}>
-            <input
-              type="text"
-              value={titulo}
-              onChange={e => setTitulo(e.target.value)}
-              placeholder="Título (opcional, ej. 'Pretemporada')"
-              style={{...inputStyle, marginBottom:8, fontSize:12}}
-            />
-            <textarea
-              value={notas}
-              onChange={e => setNotas(e.target.value)}
-              placeholder="Notas del entrenamiento (opcional)"
-              style={{...inputStyle, minHeight:60, resize:"vertical", fontSize:12, fontFamily:"inherit"}}
-            />
-          </div>
-
-          {/* Resumen de conteo */}
-          <div style={{
-            padding:10, background:"rgba(255,255,255,0.02)", borderRadius:6, marginBottom:14,
-            display:"flex", gap:14, fontSize:11, fontFamily:"var(--mono)", fontWeight:700, justifyContent:"center", flexWrap:"wrap"
-          }}>
-            <span style={{color:"var(--green)"}}>✓ {counts.presente}</span>
-            {counts.ausente > 0 && <span style={{color:"var(--red)"}}>✗ {counts.ausente}</span>}
-            {counts.justificado > 0 && <span style={{color:"var(--orange)"}}>⚠ {counts.justificado}</span>}
-            {counts.lesionado > 0 && <span style={{color:"var(--orange)"}}>🤕 {counts.lesionado}</span>}
-            {counts.estudio > 0 && <span style={{color:"var(--plat)"}}>📚 {counts.estudio}</span>}
-          </div>
-
-          {/* Lista de jugadores */}
-          <div style={{display:"flex", flexDirection:"column", gap:6, marginBottom:14}}>
-            {jugadores.map(j => {
-              const estado = asistencia[j.id]?.estado || "presente";
-              const nota = asistencia[j.id]?.nota || "";
-              const estadoInfo = ASISTENCIA_ESTADOS.find(e => e.value === estado);
-              const isEditingNote = editingNoteFor === j.id;
-              const posShort = getPositionShort(j.posicion);
-              const lineColor = getPositionColor(j.posicion);
-              return (
-                <div key={j.id} style={{
-                  padding:"8px 10px", background:"rgba(255,255,255,0.02)",
-                  border:`1px solid ${estado === "presente" ? "transparent" : estadoInfo.color + "40"}`,
-                  borderLeft: estado === "presente" ? "3px solid transparent" : `3px solid ${estadoInfo.color}`,
-                  borderRadius:4
-                }}>
-                  <div style={{display:"flex", alignItems:"center", gap:8}}>
-                    {posShort && (
-                      <span style={{
-                        minWidth:30, padding:"2px 5px", fontSize:9, fontWeight:900,
-                        fontFamily:"var(--mono)", color:"var(--bg)", background:lineColor, borderRadius:2, textAlign:"center", flexShrink:0
-                      }}>{posShort}</span>
-                    )}
-                    <div style={{flex:1, minWidth:0, fontSize:13, fontWeight:600}}>
-                      {j.numero && <span style={{color:club.theme_primary, fontFamily:"var(--mono)", marginRight:6}}>#{j.numero}</span>}
-                      {j.nombre}
-                    </div>
-                    {/* Botones de estado */}
-                    <div style={{display:"flex", gap:3, flexShrink:0}}>
-                      {ASISTENCIA_ESTADOS.map(e => {
-                        const active = estado === e.value;
-                        return (
-                          <button key={e.value} onClick={() => setEstadoJugador(j.id, e.value)}
-                            title={e.label}
-                            style={{
-                              width:28, height:28, fontSize:13, fontFamily:"var(--mono)",
-                              background: active ? e.color : "transparent",
-                              color: active ? "var(--bg)" : e.color,
-                              border: `1px solid ${e.color}${active ? "" : "40"}`,
-                              borderRadius:3, cursor:"pointer", fontWeight:700,
-                              display:"flex", alignItems:"center", justifyContent:"center"
-                            }}>
-                            {e.icon}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {/* Nota opcional */}
-                  {estado !== "presente" && (
-                    isEditingNote ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={nota}
-                        onChange={e => setNotaJugador(j.id, e.target.value)}
-                        onBlur={() => setEditingNoteFor(null)}
-                        onKeyDown={e => { if (e.key === "Enter") setEditingNoteFor(null); }}
-                        placeholder="Motivo / nota..."
-                        style={{
-                          marginTop:6, width:"100%", padding:"5px 8px", fontSize:11, fontFamily:"inherit",
-                          background:"rgba(0,0,0,0.25)", border:`1px solid ${estadoInfo.color}40`,
-                          color:"var(--white)", borderRadius:3, outline:"none"
-                        }}
-                      />
-                    ) : (
-                      <div onClick={() => setEditingNoteFor(j.id)} style={{
-                        marginTop:6, fontSize:10, color: nota ? "var(--white-soft)" : "var(--white-dim)",
-                        fontStyle: nota ? "normal" : "italic", cursor:"pointer", paddingLeft:38
-                      }}>
-                        {nota || "+ Agregar motivo"}
-                      </div>
-                    )
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Botones de acción */}
-          <div style={{display:"flex", gap:8}}>
-            <button onClick={onCancel} style={{...btnGhost, flex:1}}>Cancelar</button>
-            <button onClick={handleSave} disabled={saving} style={{...btnPrimary, flex:2}}>
-              {saving ? "Guardando..." : "💾 Guardar asistencia"}
-            </button>
-          </div>
-        </div>
-      );
-    }
 
     // Placeholder genérico para secciones todavía no implementadas
     function SeccionProximamente({ icon, titulo, descripcion, clubColor }) {
