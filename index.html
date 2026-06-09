@@ -3684,7 +3684,6 @@
         { l: "GF", v: gf, c: club.theme_primary || "var(--plat)" },
         { l: "GA", v: ga, c: "rgba(255,255,255,0.4)" },
         { l: "DG", v: (dg >= 0 ? "+" : "") + dg, c: dg >= 0 ? "var(--green)" : "var(--red)" },
-        { l: "PTS", v: pts, c: "var(--gold)" },
       ];
 
       const maxGoals = goleadores[0]?.goles || 1;
@@ -3695,24 +3694,42 @@
           background:`${club.theme_primary}0F`, border:`1px solid ${club.theme_primary}26`,
           display:"grid", gridTemplateColumns: goleadores.length > 0 ? "auto 1fr" : "1fr", gap:0
         }}>
-          {/* Panel stats */}
-          <div style={{padding:"10px 12px", borderRight: goleadores.length > 0 ? `1px solid ${club.theme_primary}26` : "none"}}>
-            <div style={{display:"flex", gap:0}}>
+          {/* Panel stats — layout reagrupado */}
+          <div style={{padding:"12px 16px", borderRight: goleadores.length > 0 ? `1px solid ${club.theme_primary}26` : "none", display:"flex", flexDirection:"column", alignItems:"center"}}>
+            {/* Línea 1: PJ PG PE PP (4 indicadores centrados) */}
+            <div style={{display:"flex", gap:0, justifyContent:"center"}}>
               {statsRow1.map(s => (
-                <div key={s.l} style={{textAlign:"center", padding:"0 7px"}}>
+                <div key={s.l} style={{textAlign:"center", padding:"0 8px"}}>
                   <div style={{fontSize:15, fontWeight:900, color:s.c, lineHeight:1, fontFamily:"var(--mono)"}}>{s.v}</div>
                   <div style={{fontSize:7, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", marginTop:3, fontWeight:600}}>{s.l}</div>
                 </div>
               ))}
             </div>
-            <div style={{display:"flex", gap:0, marginTop:6, paddingTop:6, borderTop:`1px solid ${club.theme_primary}1F`}}>
+            {/* Línea 2: GF GA DG (3 indicadores centrados, sin PTS) */}
+            <div style={{display:"flex", gap:0, marginTop:8, paddingTop:8, borderTop:`1px solid ${club.theme_primary}1F`, justifyContent:"center", width:"100%"}}>
               {statsRow2.map(s => (
-                <div key={s.l} style={{textAlign:"center", padding:"0 7px"}}>
+                <div key={s.l} style={{textAlign:"center", padding:"0 10px"}}>
                   <div style={{fontSize:15, fontWeight:900, color:s.c, lineHeight:1, fontFamily:"var(--mono)"}}>{s.v}</div>
                   <div style={{fontSize:7, letterSpacing:1.5, color:"var(--white-dim)", fontFamily:"var(--mono)", marginTop:3, fontWeight:600}}>{s.l}</div>
                 </div>
               ))}
             </div>
+            {/* PTS grande y centrado debajo */}
+            <div style={{marginTop:10, paddingTop:8, borderTop:`1px solid ${club.theme_primary}1F`, textAlign:"center", width:"100%"}}>
+              <div style={{fontSize:30, fontWeight:900, color:"var(--gold)", lineHeight:1, fontFamily:"var(--mono)", letterSpacing:-1}}>{pts}</div>
+              <div style={{fontSize:8, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", marginTop:3, fontWeight:700}}>PUNTOS</div>
+            </div>
+            {/* Botón AAHBA si la URL está configurada */}
+            {club.url_aahba_tabla && (
+              <a href={club.url_aahba_tabla} target="_blank" rel="noopener" style={{
+                marginTop:12, padding:"6px 12px", fontSize:9, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+                background:"transparent", border:`1px solid ${club.theme_primary}66`,
+                color: club.theme_primary, borderRadius:3, textDecoration:"none",
+                display:"inline-flex", alignItems:"center", gap:5
+              }}>
+                🔗 VER EN AAHBA
+              </a>
+            )}
           </div>
 
           {/* Panel goleadores */}
@@ -5253,6 +5270,7 @@
         default_kick_time: club.default_kick_time || "",
         default_citacion_time: club.default_citacion_time || "",
         default_rueda: club.default_rueda || 1,
+        url_aahba_tabla: club.url_aahba_tabla || "",
       });
       const [saving, setSaving] = useState(false);
       const [savedMsg, setSavedMsg] = useState("");
@@ -5291,6 +5309,9 @@
               <option value="1">Rueda 1</option>
               <option value="2">Rueda 2</option>
             </select>
+          </Field>
+          <Field label="URL de la tabla de AAHBA" hint="Pegá el link a tu tabla de posiciones en ahba.com.ar. Cuando esté cargado, aparece el botón en el banner de stats.">
+            <input type="text" value={data.url_aahba_tabla} onChange={e => u("url_aahba_tabla", e.target.value)} style={inputStyle} placeholder="https://ahba.com.ar/tabla_posiciones.php?genero=..."/>
           </Field>
           <div style={{display:"flex", gap:10, alignItems:"center", marginTop:8}}>
             <button onClick={handleSave} disabled={saving} style={{...btnPrimary, flex:1}}>
