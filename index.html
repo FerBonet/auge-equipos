@@ -4096,16 +4096,17 @@
       }
       return (
         <div style={{overflowX:"auto", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
-          <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:680}}>
+          <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:760}}>
             <thead>
               <tr style={{background:"rgba(255,255,255,0.04)", color:"var(--white-dim)", fontSize:9, letterSpacing:1.5, fontFamily:"var(--mono)"}}>
                 <th style={cellHead}>#</th>
                 <th style={{...cellHead, textAlign:"left"}}>NOMBRE</th>
                 <th style={cellHead}>POS</th>
                 <th style={cellHead}>EDAD</th>
+                <th style={cellHead}>DNI</th>
                 <th style={cellHead}>📞 TEL</th>
                 <th style={cellHead}>EMAIL</th>
-                <th style={cellHead}>🩸</th>
+                <th style={cellHead}>INSTAGRAM</th>
                 <th style={cellHead}>ESTADO</th>
                 {isAdmin && <th style={cellHead}/>}
               </tr>
@@ -4139,6 +4140,11 @@
                       onSaved={onReload}
                     />
                     <EditableCell
+                      jugador={j} field="dni" value={j.dni} type="text"
+                      inputProps={{maxLength:12}}
+                      onSaved={onReload}
+                    />
+                    <EditableCell
                       jugador={j} field="telefono" value={j.telefono} type="tel"
                       onSaved={onReload}
                     />
@@ -4147,8 +4153,7 @@
                       onSaved={onReload}
                     />
                     <EditableCell
-                      jugador={j} field="grupo_sanguineo" value={j.grupo_sanguineo} type="text"
-                      inputProps={{maxLength:5}}
+                      jugador={j} field="instagram" value={j.instagram} type="text"
                       onSaved={onReload}
                     />
                     <td style={{...cell, textAlign:"center"}}>
@@ -6291,6 +6296,8 @@
         fecha_nacimiento: jugador.fecha_nacimiento || "",
         telefono: jugador.telefono || "",
         email: jugador.email || "",
+        dni: jugador.dni || "",
+        instagram: jugador.instagram || "",
         // Médicos
         apto_medico_vencimiento: jugador.apto_medico_vencimiento || "",
         obra_social: jugador.obra_social || "",
@@ -6411,6 +6418,12 @@
                 </Field>
                 <Field label="Email">
                   <input type="email" value={data.email} onChange={e => u("email", e.target.value)} style={inputStyle} placeholder="ejemplo@email.com"/>
+                </Field>
+                <Field label="DNI">
+                  <input type="text" value={data.dni} onChange={e => u("dni", e.target.value)} style={inputStyle} placeholder="12.345.678"/>
+                </Field>
+                <Field label="Instagram">
+                  <input type="text" value={data.instagram} onChange={e => u("instagram", e.target.value)} style={inputStyle} placeholder="@usuario"/>
                 </Field>
               </div>
             </CollapsibleSection>
