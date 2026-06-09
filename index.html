@@ -3837,6 +3837,305 @@
       );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  SECCIÓN PLANTILLA · listado de jugadores con sub-tabs (Datos/Stats/Asistencia)
+    // ═══════════════════════════════════════════════════════════════════════════
+    function PlantillaSection({ club, session, jugadores, fechas, myRole, onReload }) {
+      const [subtab, setSubtab] = usePersistedState(`plantilla_${club.id}_subtab`, "datos"); // datos | stats | asistencia
+      const [busqueda, setBusqueda] = useState("");
+      const [mostrarInactivos, setMostrarInactivos] = useState(false);
+      const [editingJugador, setEditingJugador] = useState(null);
+      const [statsByJugador, setStatsByJugador] = useState({});
+      const [loadingStats, setLoadingStats] = useState(false);
+      const isAdmin = myRole === "owner" || myRole === "admin";
+
+      // Cargar stats agregadas para todos los jugadores cuando entrás al sub-tab Stats
+      useEffect(() => {
+        if (subtab !== "stats") return;
+        if (Object.keys(statsByJugador).length > 0) return; // ya cargados
+        setLoadingStats(true);
+        (async () => {
+          const fechaIds = (fechas || []).map(f => f.id);
+          if (fechaIds.length === 0) { setLoadingStats(false); return; }
+          const { data } = await sb.from("fecha_jugadores")
+            .select("jugador_id, status, es_titular, goles, tarjeta_amarilla, tarjeta_roja, tarjeta_verde, minutos_jugados, fecha_id")
+            .in("fecha_id", fechaIds);
+          // Indexar por jugador
+          const map = {};
+          for (const r of data || []) {
+            const j = map[r.jugador_id] || { conv: 0, titular: 0, goles: 0, amarillas: 0, rojas: 0, verdes: 0, minutos: 0 };
+            if (r.status === "convocado") {
+              j.conv += 1;
+              if (r.es_titular === true) j.titular += 1;
+            }
+            j.goles += r.goles || 0;
+            j.amarillas += r.tarjeta_amarilla || 0;
+            j.rojas += r.tarjeta_roja ? 1 : 0;
+            j.verdes += r.tarjeta_verde ? 1 : 0;
+            j.minutos += r.minutos_jugados || 0;
+            map[r.jugador_id] = j;
+          }
+          setStatsByJugador(map);
+          setLoadingStats(false);
+        })();
+      }, [subtab, fechas]);
+
+      // Filtrar jugadores según búsqueda + inactivos
+      const jugadoresFiltrados = (jugadores || [])
+        .filter(j => mostrarInactivos || j.estado === "activo")
+        .filter(j => {
+          if (!busqueda.trim()) return true;
+          const q = busqueda.toLowerCase().trim();
+          return (j.nombre || "").toLowerCase().includes(q)
+              || (j.apodo || "").toLowerCase().includes(q)
+              || String(j.numero || "").includes(q);
+        })
+        .sort((a, b) => (a.numero || 999) - (b.numero || 999));
+
+      const fmtEdad = (fechaNac) => {
+        if (!fechaNac) return "—";
+        const hoy = new Date();
+        const nac = new Date(fechaNac);
+        let edad = hoy.getFullYear() - nac.getFullYear();
+        const m = hoy.getMonth() - nac.getMonth();
+        if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--;
+        return edad;
+      };
+
+      const handleEdit = (j) => setEditingJugador(j);
+      const handleCloseEditor = async (didSave) => {
+        setEditingJugador(null);
+        if (didSave && onReload) await onReload();
+      };
+
+      if (editingJugador) {
+        return (
+          <div style={{padding:"20px 16px"}}>
+            <JugadorEditor
+              jugador={editingJugador}
+              club={club}
+              session={session}
+              viewerMode={!isAdmin}
+              onSave={() => handleCloseEditor(true)}
+              onCancel={() => handleCloseEditor(false)}
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div style={{padding:"20px 16px"}}>
+          {/* Buscador + toggle inactivos */}
+          <div style={{display:"flex", gap:8, marginBottom:14, alignItems:"center", flexWrap:"wrap"}}>
+            <input
+              type="text"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              placeholder="🔍 Buscar jugador por nombre, apodo o número..."
+              style={{
+                flex:1, minWidth:200, padding:"9px 12px", fontSize:12,
+                background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.10)",
+                color:"var(--white)", borderRadius:6, outline:"none"
+              }}
+            />
+            <label style={{display:"flex", alignItems:"center", gap:6, fontSize:11, color:"var(--white-dim)", cursor:"pointer", padding:"6px 10px", background:"rgba(255,255,255,0.03)", borderRadius:4}}>
+              <input type="checkbox" checked={mostrarInactivos} onChange={e => setMostrarInactivos(e.target.checked)}/>
+              Mostrar inactivos
+            </label>
+          </div>
+
+          {/* Sub-tabs */}
+          <div style={{display:"flex", gap:4, marginBottom:14, overflowX:"auto"}}>
+            {[
+              { id: "datos",      icon: "📇", label: "DATOS" },
+              { id: "stats",      icon: "📊", label: "ESTADÍSTICAS" },
+              { id: "asistencia", icon: "✅", label: "ASISTENCIA" },
+            ].map(s => (
+              <button key={s.id} onClick={() => setSubtab(s.id)} style={{
+                flexShrink:0, padding:"8px 12px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+                border: subtab === s.id ? `1px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.08)",
+                background: subtab === s.id ? `${club.theme_primary}1F` : "transparent",
+                color: subtab === s.id ? club.theme_primary : "var(--white-dim)",
+                borderRadius:4, cursor:"pointer"
+              }}>
+                {s.icon} {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Contador resultados */}
+          <div style={{fontSize:10, color:"var(--white-dim)", fontFamily:"var(--mono)", letterSpacing:1.5, marginBottom:8}}>
+            {jugadoresFiltrados.length} JUGADOR{jugadoresFiltrados.length !== 1 ? "ES" : ""}
+            {busqueda && ` · BUSCANDO "${busqueda}"`}
+          </div>
+
+          {/* Tabla según sub-tab */}
+          {subtab === "datos" && (
+            <PlantillaTablaDatos
+              jugadores={jugadoresFiltrados}
+              club={club}
+              isAdmin={isAdmin}
+              onEdit={handleEdit}
+              fmtEdad={fmtEdad}
+            />
+          )}
+          {subtab === "stats" && (
+            loadingStats ? <Spinner/> :
+            <PlantillaTablaStats
+              jugadores={jugadoresFiltrados}
+              statsByJugador={statsByJugador}
+              club={club}
+              isAdmin={isAdmin}
+              onEdit={handleEdit}
+            />
+          )}
+          {subtab === "asistencia" && (
+            <SeccionProximamente
+              icon="✅"
+              titulo="ASISTENCIA"
+              descripcion="Cuando armemos la sección Entrenamiento, acá vas a poder ver la asistencia de cada jugador a las prácticas: cantidad de presentes/ausentes, porcentaje y temas trabajados."
+              clubColor={club.theme_primary}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // ─── Tabla DATOS ─────────────────────────────────────────────────────────
+    function PlantillaTablaDatos({ jugadores, club, isAdmin, onEdit, fmtEdad }) {
+      if (jugadores.length === 0) {
+        return <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12}}>Sin jugadores para mostrar.</div>;
+      }
+      return (
+        <div style={{overflowX:"auto", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+          <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:680}}>
+            <thead>
+              <tr style={{background:"rgba(255,255,255,0.04)", color:"var(--white-dim)", fontSize:9, letterSpacing:1.5, fontFamily:"var(--mono)"}}>
+                <th style={cellHead}>#</th>
+                <th style={{...cellHead, textAlign:"left"}}>NOMBRE</th>
+                <th style={cellHead}>POS</th>
+                <th style={cellHead}>EDAD</th>
+                <th style={cellHead}>📞 TEL</th>
+                <th style={cellHead}>EMAIL</th>
+                <th style={cellHead}>🩸</th>
+                <th style={cellHead}>ESTADO</th>
+                <th style={cellHead}/>
+              </tr>
+            </thead>
+            <tbody>
+              {jugadores.map(j => {
+                const posShort = getPositionShort(j.posicion);
+                const lineColor = getPositionColor(j.posicion);
+                const estadoColor = j.estado === "activo" ? "var(--green)"
+                  : j.estado === "lesionado" ? "var(--orange)"
+                  : j.estado === "suspendido" ? "var(--red)"
+                  : "var(--white-dim)";
+                return (
+                  <tr key={j.id} style={{borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                    <td style={{...cell, color:club.theme_primary, fontFamily:"var(--mono)", fontWeight:900, textAlign:"center"}}>
+                      {j.numero ?? "—"}
+                      {j.es_capitan && <div style={{fontSize:7, color:"var(--gold)", marginTop:2}}>★C</div>}
+                    </td>
+                    <td style={{...cell, fontWeight:600}}>
+                      {j.nombre}
+                      {j.apodo && <span style={{fontSize:9, color:"var(--white-dim)", fontStyle:"italic", marginLeft:5}}>"{j.apodo}"</span>}
+                    </td>
+                    <td style={{...cell, textAlign:"center"}}>
+                      {posShort ? (
+                        <span style={{padding:"2px 5px", fontSize:9, fontWeight:900, fontFamily:"var(--mono)", color:"var(--bg)", background:lineColor, borderRadius:2}}>{posShort}</span>
+                      ) : "—"}
+                    </td>
+                    <td style={{...cell, textAlign:"center", color:"var(--white-soft)"}}>{fmtEdad(j.fecha_nacimiento)}</td>
+                    <td style={{...cell, color:"var(--white-soft)", fontSize:10}}>{j.telefono || "—"}</td>
+                    <td style={{...cell, color:"var(--white-soft)", fontSize:10}}>{j.email || "—"}</td>
+                    <td style={{...cell, textAlign:"center", color:"var(--white-soft)", fontFamily:"var(--mono)", fontWeight:700}}>{j.grupo_sanguineo || "—"}</td>
+                    <td style={{...cell, textAlign:"center"}}>
+                      <span style={{fontSize:8, padding:"2px 6px", color:estadoColor, border:`1px solid ${estadoColor}40`, borderRadius:3, fontFamily:"var(--mono)", letterSpacing:1}}>
+                        {(j.estado || "activo").toUpperCase().slice(0, 4)}
+                      </span>
+                    </td>
+                    <td style={{...cell, textAlign:"center"}}>
+                      <button onClick={() => onEdit(j)} style={{
+                        padding:"3px 8px", fontSize:10, background:"transparent",
+                        border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)",
+                        borderRadius:3, cursor:"pointer", fontFamily:"var(--mono)"
+                      }}>✏️</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // ─── Tabla ESTADÍSTICAS ──────────────────────────────────────────────────
+    function PlantillaTablaStats({ jugadores, statsByJugador, club, isAdmin, onEdit }) {
+      if (jugadores.length === 0) {
+        return <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12}}>Sin jugadores para mostrar.</div>;
+      }
+      return (
+        <div style={{overflowX:"auto", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+          <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:620}}>
+            <thead>
+              <tr style={{background:"rgba(255,255,255,0.04)", color:"var(--white-dim)", fontSize:9, letterSpacing:1.5, fontFamily:"var(--mono)"}}>
+                <th style={cellHead}>#</th>
+                <th style={{...cellHead, textAlign:"left"}}>NOMBRE</th>
+                <th style={cellHead}>POS</th>
+                <th style={cellHead} title="Partidos convocado">PJ</th>
+                <th style={cellHead} title="Partidos como titular">TIT</th>
+                <th style={cellHead} title="Goles">⚽</th>
+                <th style={cellHead} title="Minutos totales jugados">MIN</th>
+                <th style={cellHead}>🟢</th>
+                <th style={cellHead}>🟡</th>
+                <th style={cellHead}>🟥</th>
+                {isAdmin && <th style={cellHead}/>}
+              </tr>
+            </thead>
+            <tbody>
+              {jugadores.map(j => {
+                const posShort = getPositionShort(j.posicion);
+                const lineColor = getPositionColor(j.posicion);
+                const s = statsByJugador[j.id] || { conv:0, titular:0, goles:0, amarillas:0, rojas:0, verdes:0, minutos:0 };
+                return (
+                  <tr key={j.id} style={{borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                    <td style={{...cell, color:club.theme_primary, fontFamily:"var(--mono)", fontWeight:900, textAlign:"center"}}>{j.numero ?? "—"}</td>
+                    <td style={{...cell, fontWeight:600}}>{j.nombre}</td>
+                    <td style={{...cell, textAlign:"center"}}>
+                      {posShort ? (
+                        <span style={{padding:"2px 5px", fontSize:9, fontWeight:900, fontFamily:"var(--mono)", color:"var(--bg)", background:lineColor, borderRadius:2}}>{posShort}</span>
+                      ) : "—"}
+                    </td>
+                    <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", fontWeight:700, color:"var(--white-soft)"}}>{s.conv}</td>
+                    <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", fontWeight:700, color:"var(--white-soft)"}}>{s.titular}</td>
+                    <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", fontWeight:900, color:"var(--gold)"}}>{s.goles || "—"}</td>
+                    <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", color:"var(--white-soft)"}}>{s.minutos || "—"}</td>
+                    <td style={{...cell, textAlign:"center", color:"var(--green)", fontFamily:"var(--mono)"}}>{s.verdes || "—"}</td>
+                    <td style={{...cell, textAlign:"center", color:"var(--orange)", fontFamily:"var(--mono)"}}>{s.amarillas || "—"}</td>
+                    <td style={{...cell, textAlign:"center", color:"var(--red)", fontFamily:"var(--mono)"}}>{s.rojas || "—"}</td>
+                    {isAdmin && (
+                      <td style={{...cell, textAlign:"center"}}>
+                        <button onClick={() => onEdit(j)} style={{
+                          padding:"3px 8px", fontSize:10, background:"transparent",
+                          border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)",
+                          borderRadius:3, cursor:"pointer", fontFamily:"var(--mono)"
+                        }}>✏️</button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // Estilos compartidos para celdas de tabla en Plantilla
+    const cellHead = { padding:"8px 10px", textAlign:"center", fontWeight:700 };
+    const cell = { padding:"9px 10px", fontSize:11 };
+
     // Placeholder genérico para secciones todavía no implementadas
     function SeccionProximamente({ icon, titulo, descripcion, clubColor }) {
       return (
@@ -3970,7 +4269,17 @@
             )}
 
             {seccion === "plantilla" && (
-              <SeccionProximamente icon="👥" titulo="PLANTILLA" descripcion="Listado del plantel con estadísticas individuales (goles, partidos jugados, minutos, tarjetas) y datos de cada jugador." clubColor={club.theme_primary}/>
+              <PlantillaSection
+                club={club}
+                session={session}
+                jugadores={jugadores}
+                fechas={fechas}
+                myRole={myRole}
+                onReload={async () => {
+                  const { data } = await sb.from("jugadores").select("*").eq("club_id", club.id).order("numero", { ascending: true });
+                  setJugadores(data || []);
+                }}
+              />
             )}
 
             {seccion === "entrenamiento" && (
@@ -5864,7 +6173,7 @@
     }
 
     // Placeholder por ahora — el editor real va en el próximo paso
-    function JugadorEditor({ jugador, club, session, onSave, onCancel }) {
+    function JugadorEditor({ jugador, club, session, onSave, onCancel, viewerMode = false }) {
       const isNew = !jugador.id;
       const [data, setData] = useState({
         // Básicos
@@ -5904,6 +6213,14 @@
           apto_medico_vencimiento: data.apto_medico_vencimiento || null,
           fecha_nacimiento: data.fecha_nacimiento || null,
         };
+        // En viewerMode: preservar los campos deportivos originales (no permitimos cambiarlos)
+        if (viewerMode && !isNew) {
+          payload.numero = jugador.numero ?? null;
+          payload.posicion = jugador.posicion || "";
+          payload.estado = jugador.estado || "activo";
+          payload.es_capitan = jugador.es_capitan || false;
+          payload.carnet_aahba = jugador.carnet_aahba || "";
+        }
         const { error } = isNew
           ? await sb.from("jugadores").insert(payload)
           : await sb.from("jugadores").update(payload).eq("id", jugador.id);
@@ -5929,8 +6246,13 @@
               onToggle={() => setOpenBasicos(v => !v)}
             >
               <div style={{padding:14}}>
+                {viewerMode && (
+                  <div style={{padding:"10px 12px", background:"rgba(240,208,80,0.08)", border:"1px solid rgba(240,208,80,0.25)", borderRadius:4, marginBottom:12, fontSize:11, color:"var(--white-soft)", lineHeight:1.5}}>
+                    🔒 Los datos deportivos (número, posición, estado, carnet, capitán) solo los puede modificar un administrador del club.
+                  </div>
+                )}
                 <Field label="Número de camiseta">
-                  <input type="number" value={data.numero} onChange={e => u("numero", e.target.value)} style={inputStyle} placeholder="Ej: 10"/>
+                  <input type="number" value={data.numero} onChange={e => u("numero", e.target.value)} disabled={viewerMode} style={{...inputStyle, opacity: viewerMode ? 0.5 : 1, cursor: viewerMode ? "not-allowed" : "text"}} placeholder="Ej: 10"/>
                 </Field>
                 <Field label="Nombre completo *">
                   <input type="text" value={data.nombre} onChange={e => u("nombre", e.target.value)} style={inputStyle} placeholder="Apellido y Nombre"/>
@@ -5939,7 +6261,7 @@
                   <input type="text" value={data.apodo} onChange={e => u("apodo", e.target.value)} style={inputStyle}/>
                 </Field>
                 <Field label="Posición natural (línea)">
-                  <select value={data.posicion} onChange={e => u("posicion", e.target.value)} style={inputStyle}>
+                  <select value={data.posicion} onChange={e => u("posicion", e.target.value)} disabled={viewerMode} style={{...inputStyle, opacity: viewerMode ? 0.5 : 1, cursor: viewerMode ? "not-allowed" : "pointer"}}>
                     <option value="">— Sin asignar —</option>
                     {POSITION_GROUPS.map(g => (
                       <optgroup key={g.label} label={g.label}>
@@ -5949,16 +6271,16 @@
                   </select>
                 </Field>
                 <Field label="Estado">
-                  <select value={data.estado} onChange={e => u("estado", e.target.value)} style={inputStyle}>
+                  <select value={data.estado} onChange={e => u("estado", e.target.value)} disabled={viewerMode} style={{...inputStyle, opacity: viewerMode ? 0.5 : 1, cursor: viewerMode ? "not-allowed" : "pointer"}}>
                     {ESTADOS_JUGADOR.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}
                   </select>
                 </Field>
                 <Field label="Carnet AAHBA">
-                  <input type="text" value={data.carnet_aahba} onChange={e => u("carnet_aahba", e.target.value)} style={inputStyle} placeholder="Ej: 176206"/>
+                  <input type="text" value={data.carnet_aahba} onChange={e => u("carnet_aahba", e.target.value)} disabled={viewerMode} style={{...inputStyle, opacity: viewerMode ? 0.5 : 1, cursor: viewerMode ? "not-allowed" : "text"}} placeholder="Ej: 176206"/>
                 </Field>
                 <Field label="Capitán/a">
-                  <label style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", cursor:"pointer"}}>
-                    <input type="checkbox" checked={data.es_capitan} onChange={e => u("es_capitan", e.target.checked)} style={{width:18, height:18, cursor:"pointer"}}/>
+                  <label style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", cursor: viewerMode ? "not-allowed" : "pointer", opacity: viewerMode ? 0.5 : 1}}>
+                    <input type="checkbox" checked={data.es_capitan} onChange={e => u("es_capitan", e.target.checked)} disabled={viewerMode} style={{width:18, height:18, cursor: viewerMode ? "not-allowed" : "pointer"}}/>
                     <span style={{fontSize:13, color:"var(--white-soft)"}}>
                       {data.es_capitan ? "🎖️ Es capitán/a del equipo" : "No es capitán/a"}
                     </span>
