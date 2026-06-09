@@ -3908,23 +3908,32 @@
         if (didSave && onReload) await onReload();
       };
 
-      if (editingJugador) {
-        return (
-          <div style={{padding:"20px 16px"}}>
-            <JugadorEditor
-              jugador={editingJugador}
-              club={club}
-              session={session}
-              viewerMode={!isAdmin}
-              onSave={() => handleCloseEditor(true)}
-              onCancel={() => handleCloseEditor(false)}
-            />
-          </div>
-        );
-      }
-
       return (
-        <div style={{padding:"20px 16px"}}>
+        <div style={{padding:"20px 16px", position:"relative"}}>
+          {/* Modal de edición (flota encima sin romper la navegación) */}
+          {editingJugador && (
+            <div style={{
+              position:"fixed", inset:0, background:"rgba(0,0,0,0.7)",
+              zIndex:100, display:"flex", alignItems:"flex-start", justifyContent:"center",
+              padding:"30px 16px", overflowY:"auto"
+            }}
+              onClick={(e) => { if (e.target === e.currentTarget) handleCloseEditor(false); }}>
+              <div style={{
+                background:"var(--bg)", border:"1px solid rgba(255,255,255,0.10)",
+                borderRadius:8, padding:20, maxWidth:560, width:"100%",
+                boxShadow:"0 20px 60px rgba(0,0,0,0.6)"
+              }}>
+                <JugadorEditor
+                  jugador={editingJugador}
+                  club={club}
+                  session={session}
+                  viewerMode={!isAdmin}
+                  onSave={() => handleCloseEditor(true)}
+                  onCancel={() => handleCloseEditor(false)}
+                />
+              </div>
+            </div>
+          )}
           {/* Buscador + toggle inactivos */}
           <div style={{display:"flex", gap:8, marginBottom:14, alignItems:"center", flexWrap:"wrap"}}>
             <input
@@ -3977,6 +3986,7 @@
               isAdmin={isAdmin}
               onEdit={handleEdit}
               fmtEdad={fmtEdad}
+              onReload={onReload}
             />
           )}
           {subtab === "stats" && (
@@ -4002,7 +4012,85 @@
     }
 
     // ─── Tabla DATOS ─────────────────────────────────────────────────────────
-    function PlantillaTablaDatos({ jugadores, club, isAdmin, onEdit, fmtEdad }) {
+    // ─── Celda editable con doble click ───────────────────────────────────────
+    // Permite editar un campo del jugador directamente desde la tabla.
+    // - Doble click → entra en modo edición
+    // - Enter o blur → guarda en DB
+    // - Esc → cancela
+    function EditableCell({ jugador, field, value, type = "text", placeholder = "—", inputProps = {}, displayFormat, onSaved }) {
+      const [editing, setEditing] = useState(false);
+      const [draft, setDraft] = useState(value || "");
+      const [saving, setSaving] = useState(false);
+      const inputRef = useRef(null);
+
+      useEffect(() => { setDraft(value || ""); }, [value]);
+      useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+      const save = async () => {
+        const newVal = draft.trim();
+        const oldVal = (value || "").toString().trim();
+        if (newVal === oldVal) { setEditing(false); return; }
+        setSaving(true);
+        const payload = { [field]: newVal === "" ? null : newVal };
+        const { error } = await sb.from("jugadores").update(payload).eq("id", jugador.id);
+        setSaving(false);
+        if (error) {
+          alert("Error guardando: " + error.message);
+          setDraft(value || "");
+        } else {
+          if (onSaved) await onSaved();
+        }
+        setEditing(false);
+      };
+
+      const cancel = () => { setDraft(value || ""); setEditing(false); };
+
+      if (editing) {
+        return (
+          <td style={{...cell, padding:4, textAlign:"center"}}>
+            <input
+              ref={inputRef}
+              type={type}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onBlur={save}
+              onKeyDown={e => {
+                if (e.key === "Enter") { e.preventDefault(); save(); }
+                if (e.key === "Escape") { e.preventDefault(); cancel(); }
+              }}
+              disabled={saving}
+              {...inputProps}
+              style={{
+                width:"100%", padding:"5px 6px", fontSize:11, fontFamily:"var(--mono)",
+                background:"rgba(45,157,111,0.10)", border:"1px solid var(--green)",
+                color:"var(--white)", borderRadius:3, outline:"none", textAlign:"center",
+              }}
+            />
+          </td>
+        );
+      }
+
+      const displayValue = displayFormat ? displayFormat(value) : (value || placeholder);
+      const isEmpty = !value;
+      return (
+        <td
+          onDoubleClick={() => setEditing(true)}
+          title="Doble click para editar"
+          style={{
+            ...cell, textAlign:"center", cursor:"pointer",
+            color: isEmpty ? "var(--white-dim)" : "var(--white-soft)",
+            fontFamily: type === "tel" || type === "email" || field === "grupo_sanguineo" ? "var(--mono)" : "inherit",
+            fontWeight: field === "grupo_sanguineo" ? 700 : 400,
+            fontSize: type === "email" || type === "tel" ? 10 : 11,
+            position:"relative",
+          }}
+        >
+          {displayValue}
+        </td>
+      );
+    }
+
+    function PlantillaTablaDatos({ jugadores, club, isAdmin, onEdit, fmtEdad, onReload }) {
       if (jugadores.length === 0) {
         return <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12}}>Sin jugadores para mostrar.</div>;
       }
@@ -4019,7 +4107,7 @@
                 <th style={cellHead}>EMAIL</th>
                 <th style={cellHead}>🩸</th>
                 <th style={cellHead}>ESTADO</th>
-                <th style={cellHead}/>
+                {isAdmin && <th style={cellHead}/>}
               </tr>
             </thead>
             <tbody>
@@ -4045,22 +4133,38 @@
                         <span style={{padding:"2px 5px", fontSize:9, fontWeight:900, fontFamily:"var(--mono)", color:"var(--bg)", background:lineColor, borderRadius:2}}>{posShort}</span>
                       ) : "—"}
                     </td>
-                    <td style={{...cell, textAlign:"center", color:"var(--white-soft)"}}>{fmtEdad(j.fecha_nacimiento)}</td>
-                    <td style={{...cell, color:"var(--white-soft)", fontSize:10}}>{j.telefono || "—"}</td>
-                    <td style={{...cell, color:"var(--white-soft)", fontSize:10}}>{j.email || "—"}</td>
-                    <td style={{...cell, textAlign:"center", color:"var(--white-soft)", fontFamily:"var(--mono)", fontWeight:700}}>{j.grupo_sanguineo || "—"}</td>
+                    <EditableCell
+                      jugador={j} field="fecha_nacimiento" value={j.fecha_nacimiento} type="date"
+                      displayFormat={v => fmtEdad(v)}
+                      onSaved={onReload}
+                    />
+                    <EditableCell
+                      jugador={j} field="telefono" value={j.telefono} type="tel"
+                      onSaved={onReload}
+                    />
+                    <EditableCell
+                      jugador={j} field="email" value={j.email} type="email"
+                      onSaved={onReload}
+                    />
+                    <EditableCell
+                      jugador={j} field="grupo_sanguineo" value={j.grupo_sanguineo} type="text"
+                      inputProps={{maxLength:5}}
+                      onSaved={onReload}
+                    />
                     <td style={{...cell, textAlign:"center"}}>
                       <span style={{fontSize:8, padding:"2px 6px", color:estadoColor, border:`1px solid ${estadoColor}40`, borderRadius:3, fontFamily:"var(--mono)", letterSpacing:1}}>
                         {(j.estado || "activo").toUpperCase().slice(0, 4)}
                       </span>
                     </td>
-                    <td style={{...cell, textAlign:"center"}}>
-                      <button onClick={() => onEdit(j)} style={{
-                        padding:"3px 8px", fontSize:10, background:"transparent",
-                        border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)",
-                        borderRadius:3, cursor:"pointer", fontFamily:"var(--mono)"
-                      }}>✏️</button>
-                    </td>
+                    {isAdmin && (
+                      <td style={{...cell, textAlign:"center"}}>
+                        <button onClick={() => onEdit(j)} style={{
+                          padding:"3px 8px", fontSize:10, background:"transparent",
+                          border:"1px solid rgba(240,208,80,0.3)", color:"var(--gold)",
+                          borderRadius:3, cursor:"pointer", fontFamily:"var(--mono)"
+                        }}>✏️</button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
