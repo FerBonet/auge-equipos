@@ -5013,7 +5013,7 @@
             <>
               <div style={{display:"flex", flexDirection:"column", gap:4}}>
                 {visibles.map(ent => (
-                  <HistoricoCard key={ent.id} entrenamiento={ent} club={club} esActual={ent.fecha === fechaSel} onClick={() => setFechaSel(ent.fecha)}/>
+                  <HistoricoCard key={ent.id} entrenamiento={ent} club={club} esActual={ent.fecha === fechaSel} onClick={() => setFechaSel(ent.fecha)} jugadoresActivosCount={jugadoresActivos.length}/>
                 ))}
               </div>
               {entrenamientos.length > 10 && !verMas && (
@@ -5040,19 +5040,22 @@
     };
 
     // ─── Card resumen de un entrenamiento (histórico, clickeable) ───────────
-    function HistoricoCard({ entrenamiento, club, esActual, onClick }) {
+    function HistoricoCard({ entrenamiento, club, esActual, onClick, jugadoresActivosCount }) {
       const [stats, setStats] = useState(null);
 
       useEffect(() => {
         (async () => {
           const { data } = await sb.from("asistencia_entrenamiento")
-            .select("estado, nota")
+            .select("estado")
             .eq("entrenamiento_id", entrenamiento.id);
-          const counts = { presente:0, ausente:0 };
+          const counts = { presente:0, saf:0, ausente:0 };
           for (const r of data || []) counts[r.estado] = (counts[r.estado] || 0) + 1;
-          setStats({ counts, total: (data || []).length });
+          // Las jugadoras presentes NO tienen fila (default = presente).
+          // Se calculan como: total activos - saf - ausentes
+          counts.presente = Math.max(0, jugadoresActivosCount - counts.saf - counts.ausente);
+          setStats({ counts });
         })();
-      }, [entrenamiento.id]);
+      }, [entrenamiento.id, jugadoresActivosCount]);
 
       const d = isoToFecha(entrenamiento.fecha);
       const fechaStr = d.toLocaleDateString("es-AR", { weekday:"short", day:"numeric", month:"short" });
@@ -5075,6 +5078,7 @@
           {stats && (
             <div style={{display:"flex", gap:8, fontSize:10, fontFamily:"var(--mono)", fontWeight:700}}>
               <span style={{color:"var(--green)"}}>✓ {stats.counts.presente}</span>
+              {stats.counts.saf > 0 && <span style={{color:"var(--gold)"}}>🟡 {stats.counts.saf}</span>}
               {stats.counts.ausente > 0 && <span style={{color:"var(--red)"}}>✗ {stats.counts.ausente}</span>}
             </div>
           )}
