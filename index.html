@@ -4913,16 +4913,26 @@
                           </span>
                         ) : saving ? (
                           <span style={{fontSize:10, color:"var(--white-dim)", fontStyle:"italic"}}>Guardando…</span>
-                        ) : (
-                          <button onClick={() => isAdmin && setMotivoOpenFor(motivoOpen ? null : j.id)} disabled={!isAdmin} style={{
+                        ) : isAdmin ? (
+                          <button onClick={() => setMotivoOpenFor(motivoOpen ? null : j.id)} style={{
                             padding:"5px 10px", fontSize:10, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
                             background: isPresente ? "var(--green)1F" : (isSaf ? "rgba(240,208,80,0.15)" : "rgba(232,85,85,0.15)"),
                             border:`1px solid ${estadoColor}${isPresente ? "40" : ""}`,
-                            color: estadoColor, borderRadius:3, cursor: isAdmin ? "pointer" : "default",
+                            color: estadoColor, borderRadius:3, cursor:"pointer",
                             display:"flex", alignItems:"center", gap:4
                           }}>
                             {isPresente ? "✓ PRESENTE" : isSaf ? `🟡 SAF${motivoInfo ? " · " + motivoInfo.label.toUpperCase() : ""}` : `✗ ${motivoInfo ? motivoInfo.icon + " " + motivoInfo.label.toUpperCase() : "AUSENTE"}`}
                           </button>
+                        ) : (
+                          <span style={{
+                            padding:"5px 10px", fontSize:10, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                            background: isPresente ? "var(--green)1F" : (isSaf ? "rgba(240,208,80,0.15)" : "rgba(232,85,85,0.15)"),
+                            border:`1px solid ${estadoColor}${isPresente ? "40" : ""}`,
+                            color: estadoColor, borderRadius:3,
+                            display:"inline-flex", alignItems:"center", gap:4
+                          }}>
+                            {isPresente ? "✓ PRESENTE" : isSaf ? `🟡 SAF${motivoInfo ? " · " + motivoInfo.label.toUpperCase() : ""}` : `✗ ${motivoInfo ? motivoInfo.icon + " " + motivoInfo.label.toUpperCase() : "AUSENTE"}`}
+                          </span>
                         )}
                         {hayEntrenamiento && !isPresente && !saving && isAdmin && (
                           <button onClick={() => setEstado(j.id, "presente")} title="Marcar como presente" style={{
@@ -9392,11 +9402,26 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       });
 
       // ─── Posiciones SVG ───────────────────────────────────────────────────
-      const W = 360, H = 700;
-      const pad = 14;
-      const fw = W - pad * 2;
-      const fh = 510;
-      const SUB_ZONE_Y = fh + 35;
+      // Layout nuevo: cancha a la izquierda + suplentes en columna(s) a la derecha
+      // Si hay <=8 suplentes → todos en una columna a la derecha
+      // Si hay  9-16        → dos columnas (la 1ra a la izq de la cancha, la 2da a la der)
+      const W = 480, H = 560;
+      const pad = 10;
+      const fh = H - pad * 2;            // alto de la cancha (usa casi todo el alto del SVG)
+      const SUB_COL_W = 70;              // ancho de una columna de suplentes
+      const subCount = disponibles.length;
+      const dosColumnas = subCount > 8;
+      // ancho de cancha = ancho total - una o dos columnas
+      const fw = W - pad * 2 - (dosColumnas ? SUB_COL_W * 2 + 8 : SUB_COL_W + 4);
+      // X de inicio de la cancha (si hay columna a la izquierda)
+      const fieldX = pad + (dosColumnas ? SUB_COL_W + 4 : 0);
+      // X de la columna derecha de suplentes
+      const SUB_RIGHT_X = fieldX + fw + 4;
+      // X de la columna izquierda de suplentes (solo si hay)
+      const SUB_LEFT_X = pad;
+      const SUB_TITLE_Y = pad + 14;       // y de "SUPLENTES" arriba de las columnas
+      const SUB_START_Y = SUB_TITLE_Y + 22;
+      const SUB_STEP_Y = 56;              // espacio vertical entre suplentes
 
       // Coordenadas (en px del SVG) para un jugador
       const pxOfJugador = (jugador) => {
@@ -9404,21 +9429,35 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         if (fp && positions[fp]) {
           const p = positions[fp];
           return {
-            x: pad + (p.x / 100) * fw,
+            x: fieldX + (p.x / 100) * fw,
             y: pad + (p.y / 100) * fh,
           };
         }
         // Suplente
         const idx = disponibles.findIndex(s => s.id === jugador.id);
         if (idx < 0) return null;
-        const colCount = Math.max(4, Math.ceil(disponibles.length / 2));
-        const col = idx % colCount;
-        const row = Math.floor(idx / colCount);
-        const cellW = fw / colCount;
-        return {
-          x: pad + col * cellW + cellW / 2,
-          y: SUB_ZONE_Y + 26 + row * 70,
-        };
+        if (!dosColumnas) {
+          // Una sola columna a la derecha
+          return {
+            x: SUB_RIGHT_X + SUB_COL_W / 2,
+            y: SUB_START_Y + idx * SUB_STEP_Y,
+          };
+        } else {
+          // Dos columnas: índice par → izquierda, impar → derecha (alternado)
+          // O por mitad: primeros N/2 → izq, resto → der. Hago por mitad para que se vea ordenado.
+          const half = Math.ceil(subCount / 2);
+          if (idx < half) {
+            return {
+              x: SUB_LEFT_X + SUB_COL_W / 2,
+              y: SUB_START_Y + idx * SUB_STEP_Y,
+            };
+          } else {
+            return {
+              x: SUB_RIGHT_X + SUB_COL_W / 2,
+              y: SUB_START_Y + (idx - half) * SUB_STEP_Y,
+            };
+          }
+        }
       };
 
       // ─── DRAG: arrastrar un suplente sobre un titular para marcar cambio ──
@@ -9720,8 +9759,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           }
         }
 
-        const r = isInCancha ? 21 : 18;
-        const hitR = 30;
+        const r = isInCancha ? 19 : 16;
+        const hitR = 27;
         const apellido = displayName(jugador);
         // Dos relojes: tiempo sin cambio + tiempo neto en cancha
         const segSinCambio = liveValues.tiempoSinCambio?.[jugador.id] ?? 0;
@@ -10134,23 +10173,29 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             </div>
             <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
               {/* Cancha */}
-              <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
-              <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
-              <line x1={pad} y1={pad + fh * 0.252} x2={pad + fw} y2={pad + fh * 0.252} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
-              <line x1={pad} y1={pad + fh * 0.748} x2={pad + fw} y2={pad + fh * 0.748} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
-              <path d={`M ${pad + fw/2 - 0.30*fw} ${pad + fh} A ${0.30*fw} ${0.16*fh} 0 0 1 ${pad + fw/2 + 0.30*fw} ${pad + fh}`}
+              <rect x={fieldX} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
+              <line x1={fieldX} y1={pad + fh/2} x2={fieldX + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
+              <line x1={fieldX} y1={pad + fh * 0.252} x2={fieldX + fw} y2={pad + fh * 0.252} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+              <line x1={fieldX} y1={pad + fh * 0.748} x2={fieldX + fw} y2={pad + fh * 0.748} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
+              <path d={`M ${fieldX + fw/2 - 0.30*fw} ${pad + fh} A ${0.30*fw} ${0.16*fh} 0 0 1 ${fieldX + fw/2 + 0.30*fw} ${pad + fh}`}
                 fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
-              <path d={`M ${pad + fw/2 - 0.30*fw} ${pad} A ${0.30*fw} ${0.16*fh} 0 0 0 ${pad + fw/2 + 0.30*fw} ${pad}`}
+              <path d={`M ${fieldX + fw/2 - 0.30*fw} ${pad} A ${0.30*fw} ${0.16*fh} 0 0 0 ${fieldX + fw/2 + 0.30*fw} ${pad}`}
                 fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2}/>
-              <line x1={pad + fw/2 - 0.06*fw} y1={pad + fh} x2={pad + fw/2 + 0.06*fw} y2={pad + fh} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
-              <line x1={pad + fw/2 - 0.06*fw} y1={pad} x2={pad + fw/2 + 0.06*fw} y2={pad} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
+              <line x1={fieldX + fw/2 - 0.06*fw} y1={pad + fh} x2={fieldX + fw/2 + 0.06*fw} y2={pad + fh} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
+              <line x1={fieldX + fw/2 - 0.06*fw} y1={pad} x2={fieldX + fw/2 + 0.06*fw} y2={pad} stroke="rgba(255,255,255,0.8)" strokeWidth={3}/>
 
-              {/* Línea divisoria suplentes */}
-              <line x1={0} y1={SUB_ZONE_Y - 4} x2={W} y2={SUB_ZONE_Y - 4} stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="3 3"/>
-              <text x={W/2} y={SUB_ZONE_Y + 8} textAnchor="middle"
-                fontSize={9} fontWeight={700} fill="rgba(255,255,255,0.5)" fontFamily="var(--mono)" letterSpacing={2.5}>
-                SUPLENTES ({disponibles.length})
+              {/* Título columna derecha de suplentes */}
+              <text x={SUB_RIGHT_X + SUB_COL_W/2} y={SUB_TITLE_Y} textAnchor="middle"
+                fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.5)" fontFamily="var(--mono)" letterSpacing={2}>
+                SUPL{dosColumnas ? " ►" : ""} ({dosColumnas ? Math.ceil(subCount/2) : subCount})
               </text>
+              {/* Título columna izquierda (si aplica) */}
+              {dosColumnas && (
+                <text x={SUB_LEFT_X + SUB_COL_W/2} y={SUB_TITLE_Y} textAnchor="middle"
+                  fontSize={8} fontWeight={700} fill="rgba(255,255,255,0.5)" fontFamily="var(--mono)" letterSpacing={2}>
+                  ◄ SUPL ({Math.floor(subCount/2)})
+                </text>
+              )}
 
               {/* Líneas de cambios pendientes */}
               {renderLineasCambio()}
