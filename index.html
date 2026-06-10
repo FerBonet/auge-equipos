@@ -2198,7 +2198,7 @@
           </div>
           <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
             {/* Cancha (fondo) */}
-            <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
+            <rect x={pad} y={pad} width={fw} height={fh} fill="rgba(0,10,111,0.20)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
             {/* Línea de mediocampo */}
             <line x1={pad} y1={pad + fh/2} x2={pad + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
             {/* Líneas de 23m (punteadas) */}
@@ -2357,8 +2357,8 @@
             {/* Gradiente del campo (verde oscuro arriba, más claro abajo) */}
             <defs>
               <linearGradient id="fieldGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#1a4d3a"/>
-                <stop offset="100%" stopColor="#2d6b50"/>
+                <stop offset="0%" stopColor="#000A6F"/>
+                <stop offset="100%" stopColor="#0F1F8F"/>
               </linearGradient>
             </defs>
 
@@ -2502,14 +2502,14 @@
           <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%", display:"block"}}>
             <defs>
               <linearGradient id="grass-bg" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#1e7a1e"/>
-                <stop offset="50%" stopColor="#228b22"/>
-                <stop offset="100%" stopColor="#1e7a1e"/>
+                <stop offset="0%" stopColor="#000A6F"/>
+                <stop offset="50%" stopColor="#0F1F8F"/>
+                <stop offset="100%" stopColor="#000A6F"/>
               </linearGradient>
             </defs>
 
             {/* Fondo fuera del campo */}
-            <rect x="0" y="0" width={W} height={H} fill="#0f3d0f"/>
+            <rect x="0" y="0" width={W} height={H} fill="#000538"/>
             {/* Cancha */}
             <rect x={pad} y={pad} width={fw} height={fh} fill="url(#grass-bg)" rx="2"/>
 
@@ -10177,7 +10177,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             </div>
             <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
               {/* Cancha */}
-              <rect x={fieldX} y={pad} width={fw} height={fh} fill="rgba(45,157,111,0.10)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
+              <rect x={fieldX} y={pad} width={fw} height={fh} fill="rgba(0,10,111,0.20)" stroke="rgba(255,255,255,0.20)" strokeWidth={1.5} rx={4}/>
               <line x1={fieldX} y1={pad + fh/2} x2={fieldX + fw} y2={pad + fh/2} stroke="rgba(255,255,255,0.18)" strokeWidth={1}/>
               <line x1={fieldX} y1={pad + fh * 0.252} x2={fieldX + fw} y2={pad + fh * 0.252} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
               <line x1={fieldX} y1={pad + fh * 0.748} x2={fieldX + fw} y2={pad + fh * 0.748} stroke="rgba(255,255,255,0.30)" strokeWidth={1} strokeDasharray="4,3"/>
