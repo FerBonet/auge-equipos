@@ -9286,14 +9286,33 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       //   minutosJugados: { jugador_id: segundos }
       //   cambios: [{ cuarto, minuto_cuarto, sale_id, entra_id, field_pos }]
       // }
+      // Construye la formación actual leyendo de convRows (lo que está en DB = lo que armaste en CAMPO)
+      const buildFormacionFromConvRows = () => {
+        const f = {};
+        for (const j of jugadores) {
+          const r = convRows.find(x => x.jugador_id === j.id);
+          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && positions[r.field_pos]) {
+            f[j.id] = r.field_pos;
+          }
+        }
+        return f;
+      };
+
       const loadState = () => {
         try {
           const raw = localStorage.getItem(vivoKey(fecha.id));
           if (raw) {
             const parsed = JSON.parse(raw);
-            // SANEAR: descartar field_pos que ya no existen en la formación actual
-            // (puede pasar si la formación cambió después de armar el VIVO)
-            if (parsed.formacionActual) {
+            // Si todavía no hay cambios ni minutos jugados, el VIVO sigue siendo "transparente"
+            // a CAMPO: sobrescribimos formacionActual con lo que tenga la DB.
+            // Así si tocás algo en CAMPO, VIVO lo refleja al entrar.
+            const sinCambiosNiMinutos = (!parsed.cambios || parsed.cambios.length === 0)
+              && !parsed.isRunning
+              && (!parsed.startedAt);
+            if (sinCambiosNiMinutos) {
+              parsed.formacionActual = buildFormacionFromConvRows();
+            } else if (parsed.formacionActual) {
+              // SANEAR: descartar field_pos que ya no existen en la formación actual
               const limpio = {};
               for (const [jId, fp] of Object.entries(parsed.formacionActual)) {
                 if (positions[fp]) limpio[jId] = fp;
@@ -9303,11 +9322,10 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             return parsed;
           }
         } catch (e) {}
-        // Estado inicial desde la formación inicial guardada
-        const formacionActual = {};
+        // Estado inicial desde lo que está en CAMPO (DB)
+        const formacionActual = buildFormacionFromConvRows();
         const minutosJugados = {};
         const tiempoSinCambio = {};
-        // minutosPorCuarto: { jugadorId: { q1: segs, q2: segs, q3: segs, q4: segs } }
         const minutosPorCuarto = {};
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
@@ -9315,20 +9333,12 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados[j.id] = 0;
             tiempoSinCambio[j.id] = 0;
             minutosPorCuarto[j.id] = { q1: 0, q2: 0, q3: 0, q4: 0 };
-            // Solo asignar field_pos si es válido en la formación actual
-            if (r.es_titular === true && r.field_pos && positions[r.field_pos]) {
-              formacionActual[j.id] = r.field_pos;
-            }
           }
         }
         return {
           cuarto: 1,
           segundosCuarto: 0,
           isRunning: false,
-          // startedAt: timestamp (ms) cuando arrancó este tramo de JUGAR
-          // Si el reloj está pausado: null
-          // Cada vez que se aprieta JUGAR: Date.now()
-          // Cada vez que se pausa o se confirma cambio: null (los valores se persisten en sus campos)
           startedAt: null,
           formacionActual,
           minutosJugados,
