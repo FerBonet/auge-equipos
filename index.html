@@ -8464,18 +8464,10 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         if (!data.rival.trim()) return alert("Ingresá el rival.");
         if (!data.fecha_date) return alert("Ingresá la fecha del partido.");
 
-        // Si cambió la formación en una fecha existente, las posiciones de cancha del 4-3-3
-        // pueden no ser válidas en la nueva formación (ej. LB no existe en 3-4-3).
-        // Para evitar jugadores "huérfanos", reseteamos todos los es_titular/field_pos.
+        // Si cambió la formación en una fecha existente, hay que remappear las posiciones:
+        // los jugadores cuyo field_pos no existe en la nueva formación se reasignan
+        // por proximidad geométrica a las posiciones vacías de la nueva formación.
         const formacionCambio = !isNew && data.formacion !== fecha.formacion;
-        if (formacionCambio) {
-          if (!confirm(
-            `Cambiaste la formación de ${fecha.formacion} a ${data.formacion}.\n\n` +
-            `Para evitar inconsistencias, todos los jugadores convocados van a volver al banco. ` +
-            `Después vas a poder reasignarlos en la nueva formación desde la pestaña FORMACIÓN.\n\n` +
-            `¿Continuar?`
-          )) return;
-        }
 
         setSaving(true);
         const payload = { ...data, club_id: club.id };
@@ -8483,11 +8475,66 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           ? await sb.from("fechas").insert(payload)
           : await sb.from("fechas").update(payload).eq("id", fecha.id);
 
-        // Si cambió la formación, resetear titulares/posiciones de todos los convocados
         if (!error && formacionCambio) {
-          await sb.from("fecha_jugadores")
-            .update({ es_titular: null, field_pos: null })
-            .eq("fecha_id", fecha.id);
+          // Traer todos los titulares actuales
+          const { data: titulares } = await sb.from("fecha_jugadores")
+            .select("jugador_id, field_pos")
+            .eq("fecha_id", fecha.id)
+            .eq("es_titular", true);
+
+          const newPositions = getFormationPositions(data.formacion);
+          const newPosKeys = Object.keys(newPositions);
+
+          // Separar titulares en "siguen válidos" y "huérfanos" (su pos no existe en la nueva form.)
+          const ocupados = new Set();
+          const huerfanos = [];
+          for (const t of titulares || []) {
+            if (t.field_pos && newPositions[t.field_pos]) {
+              ocupados.add(t.field_pos); // mantiene su posición
+            } else {
+              huerfanos.push(t);
+            }
+          }
+          // Posiciones libres en la nueva formación
+          const libres = newPosKeys.filter(k => !ocupados.has(k));
+
+          // Para cada huérfano, asignar la posición libre más cercana en (x, y)
+          // Para que sea determinístico, primero ordenamos a los huérfanos por su pos anterior
+          // (los que tenían pos asignada primero, después los que no)
+          huerfanos.sort((a, b) => (a.field_pos || "zzz").localeCompare(b.field_pos || "zzz"));
+          const remaps = []; // [{jugador_id, newPos}]
+          const oldPositions = getFormationPositions(fecha.formacion);
+          for (const huerfano of huerfanos) {
+            if (libres.length === 0) {
+              // No quedan posiciones libres → al banco
+              remaps.push({ jugador_id: huerfano.jugador_id, newPos: null, esTitular: false });
+              continue;
+            }
+            // Coordenadas de la posición vieja (si tenía una, si no usa centro)
+            const oldP = huerfano.field_pos && oldPositions[huerfano.field_pos]
+              ? oldPositions[huerfano.field_pos]
+              : { x: 50, y: 50 };
+            // Buscar la libre más cercana
+            let bestKey = null;
+            let bestDist = Infinity;
+            for (const k of libres) {
+              const p = newPositions[k];
+              const d = Math.hypot(p.x - oldP.x, p.y - oldP.y);
+              if (d < bestDist) { bestDist = d; bestKey = k; }
+            }
+            remaps.push({ jugador_id: huerfano.jugador_id, newPos: bestKey, esTitular: true });
+            // Sacar de libres
+            const idx = libres.indexOf(bestKey);
+            if (idx >= 0) libres.splice(idx, 1);
+          }
+
+          // Aplicar updates
+          for (const r of remaps) {
+            await sb.from("fecha_jugadores")
+              .update({ es_titular: r.esTitular, field_pos: r.newPos })
+              .eq("fecha_id", fecha.id)
+              .eq("jugador_id", r.jugador_id);
+          }
         }
 
         // Si es visitante con datos de cancha/maps, propagar a tabla global de rivales
