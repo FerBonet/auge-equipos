@@ -8715,27 +8715,22 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // Cambiar formación (persiste en la fecha)
       const handleFormacion = async (val) => {
         const formacionVieja = formacion;
+        // 1. Cambio optimista del selector (UI ya muestra la nueva formación)
         setFormacion(val);
         setSavingFormacion(true);
-        // 1. Guardar la nueva formación
+        // 2. Persistir el cambio de formación
         await sb.from("fechas").update({ formacion: val }).eq("id", fecha.id);
 
-        // 2. Remap automático por proximidad: si un titular tenía una posición que
-        //    no existe en la nueva formación, lo reasignamos a la posición vacía más
-        //    cercana geométricamente. NO mandamos a nadie al banco si se puede evitar.
         if (formacionVieja && formacionVieja !== val) {
-          const { data: titulares } = await sb.from("fecha_jugadores")
-            .select("jugador_id, field_pos")
-            .eq("fecha_id", fecha.id)
-            .eq("es_titular", true);
-
+          // Calcular el remap usando convRows que ya tenemos en memoria (no consultamos DB)
+          const titulares = convRows.filter(r => r.es_titular === true);
           const newPositions = getFormationPositions(val);
           const oldPositions = getFormationPositions(formacionVieja);
           const newPosKeys = Object.keys(newPositions);
 
           const ocupados = new Set();
           const huerfanos = [];
-          for (const t of titulares || []) {
+          for (const t of titulares) {
             if (t.field_pos && newPositions[t.field_pos]) {
               ocupados.add(t.field_pos);
             } else {
@@ -8743,17 +8738,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             }
           }
           const libres = newPosKeys.filter(k => !ocupados.has(k));
-
-          // Ordenar huérfanos para determinismo
           huerfanos.sort((a, b) => (a.field_pos || "zzz").localeCompare(b.field_pos || "zzz"));
 
+          // Calcular las asignaciones nuevas
+          const nuevasPosiciones = {}; // { jugador_id: { es_titular, field_pos } }
           for (const huerfano of huerfanos) {
             if (libres.length === 0) {
-              // No quedan libres → al banco
-              await sb.from("fecha_jugadores")
-                .update({ es_titular: false, field_pos: null })
-                .eq("fecha_id", fecha.id)
-                .eq("jugador_id", huerfano.jugador_id);
+              nuevasPosiciones[huerfano.jugador_id] = { es_titular: false, field_pos: null };
               continue;
             }
             const oldP = huerfano.field_pos && oldPositions[huerfano.field_pos]
@@ -8766,16 +8757,27 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               const d = Math.hypot(p.x - oldP.x, p.y - oldP.y);
               if (d < bestDist) { bestDist = d; bestKey = k; }
             }
-            await sb.from("fecha_jugadores")
-              .update({ es_titular: true, field_pos: bestKey })
-              .eq("fecha_id", fecha.id)
-              .eq("jugador_id", huerfano.jugador_id);
+            nuevasPosiciones[huerfano.jugador_id] = { es_titular: true, field_pos: bestKey };
             const idx = libres.indexOf(bestKey);
             if (idx >= 0) libres.splice(idx, 1);
           }
 
-          // Recargar para que la cancha refresque
-          if (typeof load === "function") await load();
+          // 3. Update OPTIMISTA del state local (la cancha refresca al toque, sin recargar)
+          if (Object.keys(nuevasPosiciones).length > 0) {
+            setConvRows(prev => prev.map(r => {
+              const np = nuevasPosiciones[r.jugador_id];
+              return np ? { ...r, ...np } : r;
+            }));
+          }
+
+          // 4. Persistir en background (sin esperar)
+          for (const [jugadorId, updates] of Object.entries(nuevasPosiciones)) {
+            sb.from("fecha_jugadores")
+              .update(updates)
+              .eq("fecha_id", fecha.id)
+              .eq("jugador_id", jugadorId)
+              .then(() => {}, () => {});
+          }
         }
         setSavingFormacion(false);
       };
