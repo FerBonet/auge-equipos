@@ -9174,7 +9174,19 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const loadState = () => {
         try {
           const raw = localStorage.getItem(vivoKey(fecha.id));
-          if (raw) return JSON.parse(raw);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            // SANEAR: descartar field_pos que ya no existen en la formación actual
+            // (puede pasar si la formación cambió después de armar el VIVO)
+            if (parsed.formacionActual) {
+              const limpio = {};
+              for (const [jId, fp] of Object.entries(parsed.formacionActual)) {
+                if (positions[fp]) limpio[jId] = fp;
+              }
+              parsed.formacionActual = limpio;
+            }
+            return parsed;
+          }
         } catch (e) {}
         // Estado inicial desde la formación inicial guardada
         const formacionActual = {};
@@ -9188,7 +9200,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados[j.id] = 0;
             tiempoSinCambio[j.id] = 0;
             minutosPorCuarto[j.id] = { q1: 0, q2: 0, q3: 0, q4: 0 };
-            if (r.es_titular === true && r.field_pos) {
+            // Solo asignar field_pos si es válido en la formación actual
+            if (r.es_titular === true && r.field_pos && positions[r.field_pos]) {
               formacionActual[j.id] = r.field_pos;
             }
           }
@@ -9396,6 +9409,35 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosPorCuarto: live.minutosPorCuarto,
           };
         });
+      };
+
+      // ─── Sincronizar VIVO con CAMPO ──────────────────────────────────────
+      // Reemplaza la formación actual del VIVO con lo que esté guardado en fecha_jugadores.
+      // Útil si cambiaste algo en la pestaña FORMACIÓN después de abrir el VIVO.
+      const sincronizarConCampo = () => {
+        if (state.isRunning) {
+          return alert("Pausá el reloj antes de sincronizar la formación.");
+        }
+        if (state.cambios.length > 0) {
+          if (!confirm(
+            "Ya hay cambios cargados en este VIVO. " +
+            "Si sincronizás con CAMPO, vas a pisar la formación actual pero conservar los cambios cargados. ¿Continuar?"
+          )) return;
+        } else {
+          if (!confirm(
+            "Esto va a reemplazar la formación actual del VIVO con la que tenés guardada en la pestaña FORMACIÓN/CAMPO. ¿Continuar?"
+          )) return;
+        }
+        // Reconstruir formacionActual desde convRows, filtrando por posiciones válidas
+        const nuevaFormacion = {};
+        for (const j of jugadores) {
+          const r = convRows.find(x => x.jugador_id === j.id);
+          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && positions[r.field_pos]) {
+            nuevaFormacion[j.id] = r.field_pos;
+          }
+        }
+        setState(s => ({ ...s, formacionActual: nuevaFormacion }));
+        setCambiosPendientes([]); // limpiar cambios pendientes porque las posiciones cambiaron
       };
 
       // ─── Lista de jugadores en cancha y disponibles para entrar ───────────
@@ -10172,8 +10214,17 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
           {/* ─── CANCHA SVG ─── */}
           <div style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
-            <div style={{fontSize:11, color:"var(--white-soft)", marginBottom:6, textAlign:"center", lineHeight:1.4}}>
-              <span style={{fontSize:14}}>🤚</span> Arrastrá fichas: suplente↔titular = cambio · titular↔titular = swap directo
+            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6, flexWrap:"wrap"}}>
+              <div style={{fontSize:11, color:"var(--white-soft)", lineHeight:1.4, flex:1, minWidth:200}}>
+                <span style={{fontSize:14}}>🤚</span> Arrastrá fichas: suplente↔titular = cambio · titular↔titular = swap directo
+              </div>
+              <button onClick={sincronizarConCampo} title="Copiar la formación de la pestaña FORMACIÓN/CAMPO" style={{
+                padding:"5px 9px", fontSize:9, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                background:"transparent", border:"1px solid rgba(255,255,255,0.20)",
+                color:"var(--white-dim)", borderRadius:3, cursor:"pointer", flexShrink:0
+              }}>
+                🔄 SINCRONIZAR CON CAMPO
+              </button>
             </div>
             <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
               {/* Cancha */}
