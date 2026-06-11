@@ -2007,11 +2007,11 @@
     // ═══════════════════════════════════════════════════════════════════════════
     function DraggableHockeyField({ formacion, convocados, rowOf, themeColor = "var(--plat)", onPosicionChange, onClearAll }) {
       const positions = getFormationPositions(formacion);
-      const W = 320, H = 520; // un poco más alto para que entren los suplentes abajo
-      const pad = 18;
+      const W = 290, H = 440;
+      const pad = 14;
       const fw = W - pad * 2;
-      const fh = 460 - pad * 2; // alto de la cancha (resto es la "zona de suplentes")
-      const SUB_ZONE_Y = 460; // a partir de acá es zona de suplentes
+      const fh = 360 - pad * 2; // alto de la cancha
+      const SUB_ZONE_Y = 360; // a partir de acá es zona de suplentes
 
       // Mapa de fichas con su posición actual { jugador_id: {x, y} } en coords SVG
       // Si está en SUB o sin asignar → x/y se calcula sobre la zona de suplentes
@@ -2030,7 +2030,7 @@
         const col = idx % colCount;
         const row = Math.floor(idx / colCount);
         const cellW = fw / colCount;
-        const cellH = 28;
+        const cellH = 26;
         return {
           x: pad + col * cellW + cellW / 2,
           y: SUB_ZONE_Y + 22 + row * cellH,
@@ -2104,12 +2104,12 @@
           if (target === null) {
             // Fuera de cancha → suplente (solo si venía de cancha)
             if (dragging.originPos !== "SUB") {
-              onPosicionChange(dragging.jugadorId, "SUB");
+              onPosicionChange(dragging.jugadorId, "SUB", dragging.originPos);
             }
           } else {
             // Sobre cancha → snap a target
             if (dragging.originPos !== target) {
-              onPosicionChange(dragging.jugadorId, target);
+              onPosicionChange(dragging.jugadorId, target, dragging.originPos);
             }
           }
           setDragging(null);
@@ -2134,8 +2134,8 @@
         const pos = isDragging ? { x: dragging.x, y: dragging.y } : pxOf(jugador);
         const fillColor = isSub ? "var(--red)" : (isGK ? "var(--gold)" : themeColor);
         // Fichas titulares más grandes que suplentes (para mobile más fácil de agarrar)
-        const r = isSub ? 16 : 19;
-        const hitR = 28; // zona invisible de touch/click (más grande para móvil)
+        const r = isSub ? 14 : 17;
+        const hitR = 26; // zona invisible de touch/click (más grande para móvil)
         const apellido = (jugador.nombre || "").split(",")[0].split(" ")[0].slice(0, 10);
         return (
           <g key={jugador.id} style={{cursor: isDragging ? "grabbing" : "grab", touchAction:"none"}}
@@ -2149,13 +2149,13 @@
               fill={fillColor} stroke="var(--bg)" strokeWidth={2}
               style={{filter: isDragging ? "drop-shadow(0 4px 10px rgba(0,0,0,0.6))" : "none"}}
               pointerEvents="none"/>
-            <text x={pos.x} y={pos.y + 5} textAnchor="middle"
-              fontSize={isSub ? 13 : 15} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
+            <text x={pos.x} y={pos.y + 4} textAnchor="middle"
+              fontSize={isSub ? 11 : 13} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)" pointerEvents="none">
               {jugador.numero ?? "?"}
             </text>
             {!isDragging && (
-              <text x={pos.x} y={pos.y + r + 11} textAnchor="middle"
-                fontSize={9} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
+              <text x={pos.x} y={pos.y + r + 10} textAnchor="middle"
+                fontSize={8} fontWeight={700} fill="var(--white-soft)" fontFamily="var(--mono)" pointerEvents="none">
                 {apellido.toUpperCase()}
               </text>
             )}
@@ -9016,17 +9016,23 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       });
 
       // Cambiar posición de un jugador (titular en field_pos, o SUB, o sin asignar)
-      const setPosicion = (jugadorId, newPos) => {
+      const setPosicion = (jugadorId, newPos, originPos) => {
         if (!newPos) {
           // Limpiar (volverlo a "convocado pero sin definir si titular o suplente")
           onUpdate(jugadorId, { es_titular: null, field_pos: null });
         } else if (newPos === "SUB") {
           onUpdate(jugadorId, { es_titular: false, field_pos: null });
         } else {
-          // Si ya hay alguien en esa posición, lo dejamos sin asignar
           const existing = titularDe(newPos);
+          const veniaDeCancha = originPos && originPos !== "SUB";
           if (existing && existing.id !== jugadorId) {
-            onUpdate(existing.id, { es_titular: null, field_pos: null });
+            if (veniaDeCancha) {
+              // SWAP: el ocupante se va a la posición de origen
+              onUpdate(existing.id, { es_titular: true, field_pos: originPos });
+            } else {
+              // Venía del banco: el ocupante se va al banco
+              onUpdate(existing.id, { es_titular: false, field_pos: null });
+            }
           }
           onUpdate(jugadorId, { es_titular: true, field_pos: newPos });
         }
