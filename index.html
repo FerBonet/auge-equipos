@@ -2954,42 +2954,91 @@
     // Se renderiza adentro del área a capturar para que la imagen tenga contexto
     function ExportableHeader({ fecha, club, counts }) {
       const fechaTxt = fecha.fecha_date ? formatDateLong(fecha.fecha_date) : "Sin fecha";
-      const horaTxt = fecha.kick_time ? ` · ${fecha.kick_time}` : "";
       const condicion = (fecha.condition || "").toUpperCase();
       const rival = fecha.rival || "—";
+      const isLocal = fecha.condition === "Local";
+      const isVisitante = fecha.condition === "Visitante";
+
+      // Resolver camiseta
+      let kitLabel = "";
+      let kitDesc = "";
+      if (fecha.kit === "suplente") {
+        kitLabel = "SUPLENTE";
+        kitDesc = club.kit_suplente || "";
+      } else if (fecha.kit === "sin_definir") {
+        kitLabel = "SIN DEFINIR";
+      } else {
+        kitLabel = "TITULAR";
+        kitDesc = club.kit_titular || "";
+      }
+
+      // Ícono de condición
+      const condIcon = isLocal ? "🏠" : isVisitante ? "✈️" : "•";
+
+      // Filas de info que sí tienen valor
+      const rows = [];
+      if (fecha.citacion_time) rows.push({ icon: "📍", label: "CITACIÓN", value: fecha.citacion_time });
+      if (fecha.kick_time)     rows.push({ icon: "⏱",  label: "PARTIDO",  value: fecha.kick_time });
+      if (fecha.location)      rows.push({ icon: "🏟",  label: "CANCHA",   value: fecha.location });
+      if (kitLabel && kitLabel !== "SIN DEFINIR") {
+        rows.push({ icon: "👕", label: "CAMISETA", value: kitDesc ? `${kitLabel} · ${kitDesc}` : kitLabel });
+      }
 
       return (
         <div style={{
-          padding:"12px 14px", background:`linear-gradient(135deg, ${club.theme_primary}26 0%, transparent 100%)`,
-          border:`1px solid ${club.theme_primary}40`, borderRadius:6,
-          display:"flex", alignItems:"center", gap:12
+          padding:"14px 16px", background:`linear-gradient(135deg, ${club.theme_primary}26 0%, transparent 100%)`,
+          border:`1px solid ${club.theme_primary}40`, borderRadius:6
         }}>
-          {club.escudo_base64 ? (
-            <img src={club.escudo_base64} style={{width:42, height:"auto", maxHeight:48, objectFit:"contain", flexShrink:0}}/>
-          ) : (
+          {/* Fila 1: escudo + club + rival + counts */}
+          <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:12}}>
+            {club.escudo_base64 ? (
+              <img src={club.escudo_base64} style={{width:48, height:"auto", maxHeight:56, objectFit:"contain", flexShrink:0}}/>
+            ) : (
+              <div style={{
+                width:48, height:48, borderRadius:6, background:`${club.theme_primary}30`,
+                border:`1.5px solid ${club.theme_primary}`, display:"flex", alignItems:"center", justifyContent:"center",
+                color:club.theme_primary, fontWeight:900, fontSize:14, flexShrink:0
+              }}>{club.nombre.slice(0,3).toUpperCase()}</div>
+            )}
+            <div style={{flex:1, minWidth:0}}>
+              <div style={{fontSize:9, letterSpacing:2.5, color:club.theme_primary, fontFamily:"var(--mono)", fontWeight:700}}>
+                {club.nombre.toUpperCase()} · {club.categoria.toUpperCase()}
+              </div>
+              <div style={{fontSize:16, fontWeight:900, marginTop:3, lineHeight:1.15}}>
+                F{fecha.fecha_num} · {condIcon} {condicion} vs {rival}
+              </div>
+              <div style={{fontSize:11, color:"var(--white-dim)", marginTop:4, fontFamily:"var(--mono)", textTransform:"capitalize"}}>
+                {fechaTxt}
+              </div>
+            </div>
+            <div style={{display:"flex", gap:8, flexShrink:0}}>
+              <MiniCount value={counts.convocados} color="var(--green)" label="C"/>
+              <MiniCount value={counts.duda} color="var(--orange)" label="D"/>
+              <MiniCount value={counts.baja} color="var(--red)" label="B"/>
+            </div>
+          </div>
+
+          {/* Bloque de info del partido (2 columnas para compactar) */}
+          {rows.length > 0 && (
             <div style={{
-              width:42, height:42, borderRadius:6, background:`${club.theme_primary}30`,
-              border:`1.5px solid ${club.theme_primary}`, display:"flex", alignItems:"center", justifyContent:"center",
-              color:club.theme_primary, fontWeight:900, fontSize:14, flexShrink:0
-            }}>{club.nombre.slice(0,3).toUpperCase()}</div>
+              display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:"6px 12px",
+              paddingTop:10, borderTop:`1px solid ${club.theme_primary}30`
+            }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{display:"flex", alignItems:"center", gap:6, minWidth:0}}>
+                  <span style={{fontSize:13, flexShrink:0}}>{r.icon}</span>
+                  <div style={{minWidth:0, flex:1}}>
+                    <div style={{fontSize:8, fontFamily:"var(--mono)", letterSpacing:1.5, color:"var(--white-dim)", fontWeight:700}}>
+                      {r.label}
+                    </div>
+                    <div style={{fontSize:11, fontWeight:700, color:"var(--white-soft)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                      {r.value}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-          <div style={{flex:1, minWidth:0}}>
-            <div style={{fontSize:9, letterSpacing:2.5, color:club.theme_primary, fontFamily:"var(--mono)", fontWeight:700}}>
-              {club.nombre.toUpperCase()} · {club.categoria.toUpperCase()}
-            </div>
-            <div style={{fontSize:14, fontWeight:900, marginTop:2, lineHeight:1.2}}>
-              F{fecha.fecha_num} · {condicion} vs {rival}
-            </div>
-            <div style={{fontSize:10, color:"var(--white-dim)", marginTop:3, fontFamily:"var(--mono)"}}>
-              {fechaTxt}{horaTxt}
-            </div>
-          </div>
-          {/* Mini contadores */}
-          <div style={{display:"flex", gap:8, flexShrink:0}}>
-            <MiniCount value={counts.convocados} color="var(--green)" label="C"/>
-            <MiniCount value={counts.duda} color="var(--orange)" label="D"/>
-            <MiniCount value={counts.baja} color="var(--red)" label="B"/>
-          </div>
         </div>
       );
     }
