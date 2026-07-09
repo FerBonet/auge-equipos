@@ -4049,7 +4049,7 @@
           )}
           {subtab === "stats" && (
             loadingStats ? <Spinner/> :
-            <PlantillaTablaStats
+            <PlantillaStatsWrapper
               jugadores={jugadoresFiltrados}
               statsByJugador={statsByJugador}
               club={club}
@@ -4463,6 +4463,165 @@
               })}
             </tbody>
           </table>
+        </div>
+      );
+    }
+
+    // ─── Wrapper de STATS con toggle Local / Global ──────────────────────────
+    function PlantillaStatsWrapper({ jugadores, statsByJugador, club, isAdmin, onEdit }) {
+      const [modo, setModo] = usePersistedState(`plantilla_${club.id}_stats_modo`, "local");
+      return (
+        <div>
+          {/* Toggle modo */}
+          <div style={{display:"flex", gap:4, marginBottom:12}}>
+            <button onClick={() => setModo("local")} style={{
+              flex:1, padding:"8px 10px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+              border: modo === "local" ? `1px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.08)",
+              background: modo === "local" ? `${club.theme_primary}1F` : "transparent",
+              color: modo === "local" ? club.theme_primary : "var(--white-dim)",
+              borderRadius:4, cursor:"pointer"
+            }}>
+              📋 DE ESTE PLANTEL
+            </button>
+            <button onClick={() => setModo("global")} style={{
+              flex:1, padding:"8px 10px", fontSize:10, fontFamily:"var(--mono)", letterSpacing:1.5, fontWeight:700,
+              border: modo === "global" ? `1px solid ${club.theme_primary}` : "1px solid rgba(255,255,255,0.08)",
+              background: modo === "global" ? `${club.theme_primary}1F` : "transparent",
+              color: modo === "global" ? club.theme_primary : "var(--white-dim)",
+              borderRadius:4, cursor:"pointer"
+            }}>
+              🌐 TARJETAS GLOBAL
+            </button>
+          </div>
+          {modo === "local" ? (
+            <PlantillaTablaStats
+              jugadores={jugadores}
+              statsByJugador={statsByJugador}
+              club={club}
+              isAdmin={isAdmin}
+              onEdit={onEdit}
+            />
+          ) : (
+            <PlantillaTablaTarjetasGlobal jugadores={jugadores} club={club}/>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Tabla de tarjetas acumuladas cross-club (por carnet AAHBA) ───────────
+    function PlantillaTablaTarjetasGlobal({ jugadores, club }) {
+      const [rows, setRows] = useState([]);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        (async () => {
+          setLoading(true);
+          // Traer los carnets del plantel actual (no vacíos)
+          const carnets = jugadores.map(j => j.carnet_aahba?.trim()).filter(Boolean);
+          if (carnets.length === 0) {
+            setRows([]);
+            setLoading(false);
+            return;
+          }
+          // Consultar la vista SQL de acumulados globales
+          const { data, error } = await sb.from("tarjetas_acumuladas_global")
+            .select("*")
+            .in("carnet_aahba", carnets);
+          if (error) {
+            console.warn("Error tarjetas global:", error.message);
+          }
+          setRows(data || []);
+          setLoading(false);
+        })();
+      }, [club.id, jugadores.length]);
+
+      if (loading) return <Spinner/>;
+
+      if (jugadores.length === 0) {
+        return <div style={{padding:30, textAlign:"center", color:"var(--white-dim)", fontSize:12}}>Sin jugadores en el plantel.</div>;
+      }
+
+      // Indexar los datos globales por carnet para lookup
+      const globalByCarnet = {};
+      for (const r of rows) globalByCarnet[r.carnet_aahba] = r;
+
+      // Preparar filas ordenadas por total de sanción (roja + amar + verde)
+      const filas = jugadores
+        .filter(j => j.carnet_aahba?.trim())
+        .map(j => {
+          const g = globalByCarnet[j.carnet_aahba.trim()] || null;
+          return {
+            jugador: j,
+            verdes: g?.verdes || 0,
+            amarillas: g?.amarillas || 0,
+            rojas: g?.rojas || 0,
+            clubes: g?.clubes || [],
+            clubesCount: g?.clubes_count || 1,
+          };
+        })
+        .sort((a, b) => (b.rojas * 100 + b.amarillas * 10 + b.verdes) - (a.rojas * 100 + a.amarillas * 10 + a.verdes));
+
+      const sinCarnet = jugadores.filter(j => !j.carnet_aahba?.trim());
+
+      return (
+        <div>
+          {/* Cartel informativo */}
+          <div style={{
+            padding:"10px 12px", background:"rgba(240,208,80,0.06)", border:"1px solid rgba(240,208,80,0.20)",
+            borderRadius:4, marginBottom:10, fontSize:10, color:"var(--white-soft)", lineHeight:1.5
+          }}>
+            🌐 <b>Tarjetas acumuladas por carnet AAHBA</b> — suma sanciones del jugador en todos los planteles/clubes donde participa. El match es por carnet AAHBA.
+            {sinCarnet.length > 0 && (
+              <div style={{marginTop:5, color:"var(--orange)"}}>
+                ⚠ {sinCarnet.length} jugador(es) sin carnet cargado no participan del acumulado global.
+              </div>
+            )}
+          </div>
+
+          {/* Tabla */}
+          <div style={{overflowX:"auto", background:"rgba(255,255,255,0.02)", borderRadius:6}}>
+            <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:520}}>
+              <thead>
+                <tr style={{background:"rgba(255,255,255,0.04)", color:"var(--white-dim)", fontSize:9, letterSpacing:1.5, fontFamily:"var(--mono)"}}>
+                  <th style={cellHead}>#</th>
+                  <th style={{...cellHead, textAlign:"left"}}>NOMBRE</th>
+                  <th style={cellHead} title="Carnet AAHBA">CARNET</th>
+                  <th style={cellHead} title="Planteles en los que juega">PLANTELES</th>
+                  <th style={cellHead} title="Verdes acumuladas">🟢</th>
+                  <th style={cellHead} title="Amarillas acumuladas">🟡</th>
+                  <th style={cellHead} title="Rojas acumuladas">🟥</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filas.map(f => {
+                  const j = f.jugador;
+                  const otrosClubes = f.clubes.filter(c => c && c !== club.nombre);
+                  return (
+                    <tr key={j.id} style={{borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                      <td style={{...cell, color:club.theme_primary, fontFamily:"var(--mono)", fontWeight:900, textAlign:"center"}}>{j.numero ?? "—"}</td>
+                      <td style={{...cell, fontWeight:600}}>
+                        {j.nombre}
+                        {otrosClubes.length > 0 && (
+                          <div style={{fontSize:9, color:"var(--gold)", fontStyle:"italic", marginTop:2}}>
+                            + {otrosClubes.join(", ")}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", color:"var(--white-soft)", fontSize:10}}>
+                        {j.carnet_aahba}
+                      </td>
+                      <td style={{...cell, textAlign:"center", fontFamily:"var(--mono)", fontWeight:700, color: f.clubesCount > 1 ? "var(--gold)" : "var(--white-soft)"}}>
+                        {f.clubesCount}
+                      </td>
+                      <td style={{...cell, textAlign:"center", color:"var(--green)", fontFamily:"var(--mono)", fontWeight:700}}>{f.verdes || "—"}</td>
+                      <td style={{...cell, textAlign:"center", color:"var(--orange)", fontFamily:"var(--mono)", fontWeight:700}}>{f.amarillas || "—"}</td>
+                      <td style={{...cell, textAlign:"center", color:"var(--red)", fontFamily:"var(--mono)", fontWeight:700}}>{f.rojas || "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
