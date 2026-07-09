@@ -9303,36 +9303,36 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const raw = localStorage.getItem(vivoKey(fecha.id));
           if (raw) {
             const parsed = JSON.parse(raw);
-            // Si todavía no hay cambios ni minutos jugados, el VIVO sigue siendo "transparente"
-            // a CAMPO: sobrescribimos formacionActual con lo que tenga la DB.
-            // Así si tocás algo en CAMPO, VIVO lo refleja al entrar.
             const sinCambiosNiMinutos = (!parsed.cambios || parsed.cambios.length === 0)
               && !parsed.isRunning
               && (!parsed.startedAt);
             if (sinCambiosNiMinutos) {
               parsed.formacionActual = buildFormacionFromConvRows();
             } else if (parsed.formacionActual) {
-              // SANEAR: descartar field_pos que ya no existen en la formación actual
               const limpio = {};
               for (const [jId, fp] of Object.entries(parsed.formacionActual)) {
                 if (positions[fp]) limpio[jId] = fp;
               }
               parsed.formacionActual = limpio;
             }
+            // Backward compat: si el state guardado no tiene sanciones/minutosSuspendidos, inicializar
+            if (!parsed.sanciones) parsed.sanciones = {};
+            if (!parsed.minutosSuspendidos) parsed.minutosSuspendidos = {};
             return parsed;
           }
         } catch (e) {}
-        // Estado inicial desde lo que está en CAMPO (DB)
         const formacionActual = buildFormacionFromConvRows();
         const minutosJugados = {};
         const tiempoSinCambio = {};
         const minutosPorCuarto = {};
+        const minutosSuspendidos = {};
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
           if (r?.status === "convocado") {
             minutosJugados[j.id] = 0;
             tiempoSinCambio[j.id] = 0;
             minutosPorCuarto[j.id] = { q1: 0, q2: 0, q3: 0, q4: 0 };
+            minutosSuspendidos[j.id] = 0;
           }
         }
         return {
@@ -9344,7 +9344,10 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           minutosJugados,
           tiempoSinCambio,
           minutosPorCuarto,
+          minutosSuspendidos,
           cambios: [],
+          // sanciones: { jugadorId: { color: "verde"|"amarilla"|"roja", duracion: segs|null, restante: segs, posicionOriginal: "MC", minutoInicio: "Q2 12:34" } }
+          sanciones: {},
         };
       };
 
@@ -9407,6 +9410,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados: s.minutosJugados,
             tiempoSinCambio: s.tiempoSinCambio,
             minutosPorCuarto: s.minutosPorCuarto || {},
+            sanciones: s.sanciones || {},
+            minutosSuspendidos: s.minutosSuspendidos || {},
           };
         }
         const offset = Math.max(0, Math.floor((now - s.startedAt) / 1000));
@@ -9420,18 +9425,29 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         for (const jId of Object.keys(s.tiempoSinCambio)) {
           sinCambio[jId] = (sinCambio[jId] || 0) + realOffset;
         }
-        // Sumar el realOffset al cuarto actual de cada jugador en cancha
         const porCuarto = { ...(s.minutosPorCuarto || {}) };
         const qKey = `q${s.cuarto}`;
         for (const jId of Object.keys(s.formacionActual)) {
           const prev = porCuarto[jId] || { q1: 0, q2: 0, q3: 0, q4: 0 };
           porCuarto[jId] = { ...prev, [qKey]: (prev[qKey] || 0) + realOffset };
         }
+        // Descontar tiempo de sanciones y sumar a minutosSuspendidos
+        const nuevasSanciones = { ...(s.sanciones || {}) };
+        const nuevosSuspendidos = { ...(s.minutosSuspendidos || {}) };
+        for (const [jId, sanc] of Object.entries(nuevasSanciones)) {
+          nuevosSuspendidos[jId] = (nuevosSuspendidos[jId] || 0) + realOffset;
+          if (sanc.duracion !== null && typeof sanc.duracion === "number") {
+            const restanteNuevo = Math.max(0, sanc.restante - realOffset);
+            nuevasSanciones[jId] = { ...sanc, restante: restanteNuevo };
+          }
+        }
         return {
           segundosCuarto: segs,
           minutosJugados: minutos,
           tiempoSinCambio: sinCambio,
           minutosPorCuarto: porCuarto,
+          sanciones: nuevasSanciones,
+          minutosSuspendidos: nuevosSuspendidos,
         };
       };
 
@@ -9471,9 +9487,23 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             segundosCuarto: liveValues.segundosCuarto,
             minutosJugados: liveValues.minutosJugados,
             tiempoSinCambio: liveValues.tiempoSinCambio,
+            minutosPorCuarto: liveValues.minutosPorCuarto,
+            sanciones: liveValues.sanciones,
+            minutosSuspendidos: liveValues.minutosSuspendidos,
           }));
         }
       }, [liveValues.segundosCuarto]);
+
+      // ─── Volver automático de sanciones cumplidas ────────────────────────
+      // Cuando una sanción llega a restante=0 (y no es roja), traer al jugador de vuelta
+      useEffect(() => {
+        const cumplidas = Object.entries(liveValues.sanciones || {})
+          .filter(([id, s]) => s.duracion !== null && s.restante <= 0);
+        if (cumplidas.length === 0) return;
+        for (const [jugadorId, sanc] of cumplidas) {
+          volverDeSancion(jugadorId);
+        }
+      }, [Object.entries(liveValues.sanciones || {}).map(([id, s]) => s.restante).join(",")]);
 
       // ─── Helpers de reloj ─────────────────────────────────────────────────
       const fmtTime = (segs) => {
@@ -9494,6 +9524,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
             minutosPorCuarto: live.minutosPorCuarto,
+            sanciones: live.sanciones,
+            minutosSuspendidos: live.minutosSuspendidos,
           };
         } else {
           // Jugando: marcar startedAt con timestamp actual
@@ -9516,6 +9548,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
             minutosPorCuarto: live.minutosPorCuarto,
+            sanciones: live.sanciones,
+            minutosSuspendidos: live.minutosSuspendidos,
           };
         });
       };
@@ -9532,8 +9566,102 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             minutosJugados: live.minutosJugados,
             tiempoSinCambio: live.tiempoSinCambio,
             minutosPorCuarto: live.minutosPorCuarto,
+            sanciones: live.sanciones,
+            minutosSuspendidos: live.minutosSuspendidos,
           };
         });
+      };
+
+      // ─── Aplicar una sanción (verde/amarilla/roja) a un jugador que está en cancha ────
+      const aplicarSancion = (jugadorId, box) => {
+        const posActual = state.formacionActual[jugadorId];
+        if (!posActual) return; // no está en cancha, no debería llegar acá
+        // Formato del minuto en el que se sancionó
+        const live = computeLiveValues(state, Date.now());
+        const secs = live.segundosCuarto;
+        const mm = Math.floor(secs / 60);
+        const ss = Math.floor(secs % 60);
+        const minutoStr = `Q${state.cuarto} ${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}`;
+
+        setState(s => {
+          // Persistir valores live antes de cambiar el estado
+          const l = computeLiveValues(s, Date.now());
+          const newFormacion = { ...s.formacionActual };
+          delete newFormacion[jugadorId]; // libera la posición
+          return {
+            ...s,
+            formacionActual: newFormacion,
+            minutosJugados: l.minutosJugados,
+            tiempoSinCambio: l.tiempoSinCambio,
+            minutosPorCuarto: l.minutosPorCuarto,
+            // Si el reloj estaba corriendo, reiniciar startedAt para no doblar cuenta
+            startedAt: s.isRunning ? Date.now() : null,
+            sanciones: {
+              ...s.sanciones,
+              [jugadorId]: {
+                boxKey: box.key,
+                color: box.key === "roja" ? "roja" : (box.key === "verde" ? "verde" : "amarilla"),
+                duracion: box.dur,          // segundos totales de sanción (null = roja)
+                restante: box.dur,          // segundos restantes
+                posicionOriginal: posActual, // para volver a esta pos
+                minutoInicio: minutoStr,
+                cuartoInicio: s.cuarto,
+              },
+            },
+          };
+        });
+      };
+
+      // ─── Volver un jugador desde el box de sanción a la cancha ─────────
+      // Se llama automáticamente cuando el contador llega a 0.
+      // Va a su posición original si está libre, sino a cualquier libre por proximidad, sino al banco.
+      const volverDeSancion = (jugadorId) => {
+        setState(s => {
+          const sanc = s.sanciones[jugadorId];
+          if (!sanc) return s;
+          const posOriginal = sanc.posicionOriginal;
+          const ocupadas = new Set(Object.values(s.formacionActual));
+          let destino = null;
+          if (posOriginal && positions[posOriginal] && !ocupadas.has(posOriginal)) {
+            destino = posOriginal;
+          } else {
+            // Buscar la libre más cercana geométricamente a su posición original
+            const libres = Object.keys(positions).filter(k => !ocupadas.has(k));
+            if (libres.length > 0 && posOriginal && positions[posOriginal]) {
+              const p0 = positions[posOriginal];
+              let bestKey = null, bestDist = Infinity;
+              for (const k of libres) {
+                const p = positions[k];
+                const d = Math.hypot(p.x - p0.x, p.y - p0.y);
+                if (d < bestDist) { bestDist = d; bestKey = k; }
+              }
+              destino = bestKey;
+            }
+          }
+          const newFormacion = { ...s.formacionActual };
+          if (destino) {
+            newFormacion[jugadorId] = destino;
+          }
+          // Sacar la sanción del jugador
+          const newSanciones = { ...s.sanciones };
+          delete newSanciones[jugadorId];
+          // Resetear el tiempoSinCambio para el jugador que vuelve (empieza a contar desde ahora)
+          const newTsc = { ...s.tiempoSinCambio, [jugadorId]: 0 };
+          return {
+            ...s,
+            formacionActual: newFormacion,
+            sanciones: newSanciones,
+            tiempoSinCambio: newTsc,
+            // Si el reloj estaba corriendo, actualizar startedAt para reiniciar el contador
+            startedAt: s.isRunning ? Date.now() : null,
+          };
+        });
+      };
+
+      // ─── Cancelar sanción manualmente (por ej. si te equivocaste) ──────
+      const cancelarSancion = (jugadorId) => {
+        if (!confirm("¿Cancelar esta sanción?")) return;
+        volverDeSancion(jugadorId);
       };
 
       // ─── Sincronizar VIVO con CAMPO ──────────────────────────────────────
@@ -9565,12 +9693,14 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         setCambiosPendientes([]); // limpiar cambios pendientes porque las posiciones cambiaron
       };
 
-      // ─── Lista de jugadores en cancha y disponibles para entrar ───────────
-      const enCancha = jugadores.filter(j => state.formacionActual[j.id]); // tiene posición en cancha
+      // ─── Lista de jugadores en cancha, disponibles y sancionados ─────────
+      const sancionadoIds = new Set(Object.keys(state.sanciones || {}));
+      const enCancha = jugadores.filter(j => state.formacionActual[j.id] && !sancionadoIds.has(j.id));
       const disponibles = jugadores.filter(j => {
         const r = convRows.find(x => x.jugador_id === j.id);
-        return r?.status === "convocado" && !state.formacionActual[j.id]; // convocado pero no en cancha
+        return r?.status === "convocado" && !state.formacionActual[j.id] && !sancionadoIds.has(j.id);
       });
+      const sancionados = jugadores.filter(j => sancionadoIds.has(j.id));
 
       // ─── Posiciones SVG ───────────────────────────────────────────────────
       // Layout nuevo: cancha a la izquierda + suplentes en columna(s) a la derecha
@@ -9592,10 +9722,50 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const SUB_LEFT_X = pad;
       const SUB_TITLE_Y = pad + 14;       // y de "SUPLENTES" arriba de las columnas
       const SUB_START_Y = SUB_TITLE_Y + 22;
-      const SUB_STEP_Y = 56;              // espacio vertical entre suplentes
+      const SUB_STEP_Y = 52;              // espacio vertical entre suplentes
+
+      // ─── Boxes de sanción ───────────────────────────────────────────────
+      // Los 4 boxes viven pegados al borde inferior de la columna derecha.
+      // Se van apilados verticalmente en la parte de abajo del SVG.
+      const SANCION_BOX_W = SUB_COL_W;
+      const SANCION_BOX_H = 46;
+      const SANCION_BOX_X = SUB_RIGHT_X;
+      // La primera box empieza a esta altura desde arriba, dejando espacio para suplentes.
+      // Total boxes = 4 (verde, amarilla 5, amarilla 10, roja)
+      const SANCION_STACK_H = SANCION_BOX_H * 4 + 8; // + separación
+      const SANCION_START_Y = H - pad - SANCION_STACK_H;
+      const BOXES = [
+        { key: "verde",    label: "🟢 VERDE 2'",    color: "#2D9D6F", dur: 120 },
+        { key: "amar5",    label: "🟡 AMAR 5'",     color: "#F0D050", dur: 300 },
+        { key: "amar10",   label: "🟡 AMAR 10'",    color: "#F0A050", dur: 600 },
+        { key: "roja",     label: "🔴 ROJA",        color: "#E85555", dur: null },
+      ];
+      // Coordenadas centro de cada box
+      const boxCenter = (idx) => ({
+        x: SANCION_BOX_X + SANCION_BOX_W / 2,
+        y: SANCION_START_Y + idx * (SANCION_BOX_H + 2) + SANCION_BOX_H / 2,
+      });
+      // Detectar si un punto (x, y) cae dentro de algún box de sanción
+      const boxAtPoint = (x, y) => {
+        for (let i = 0; i < BOXES.length; i++) {
+          const cx = SANCION_BOX_X, cy = SANCION_START_Y + i * (SANCION_BOX_H + 2);
+          if (x >= cx && x <= cx + SANCION_BOX_W && y >= cy && y <= cy + SANCION_BOX_H) {
+            return BOXES[i];
+          }
+        }
+        return null;
+      };
 
       // Coordenadas (en px del SVG) para un jugador
       const pxOfJugador = (jugador) => {
+        // Si está sancionado, mostrarlo en el box correspondiente
+        const sanc = state.sanciones?.[jugador.id];
+        if (sanc) {
+          const boxIdx = BOXES.findIndex(b => b.key === sanc.boxKey);
+          if (boxIdx >= 0) {
+            return boxCenter(boxIdx);
+          }
+        }
         const fp = state.formacionActual[jugador.id];
         if (fp && positions[fp]) {
           const p = positions[fp];
@@ -9608,14 +9778,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         const idx = disponibles.findIndex(s => s.id === jugador.id);
         if (idx < 0) return null;
         if (!dosColumnas) {
-          // Una sola columna a la derecha
           return {
             x: SUB_RIGHT_X + SUB_COL_W / 2,
             y: SUB_START_Y + idx * SUB_STEP_Y,
           };
         } else {
-          // Dos columnas: índice par → izquierda, impar → derecha (alternado)
-          // O por mitad: primeros N/2 → izq, resto → der. Hago por mitad para que se vea ordenado.
           const half = Math.ceil(subCount / 2);
           if (idx < half) {
             return {
@@ -9667,6 +9834,26 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
           const arrastrado = jugadores.find(j => j.id === draggingId);
           const arrastradoEnCancha = !!state.formacionActual[draggingId];
+
+          // ─── 0. ¿Cayó sobre un box de sanción? ───────────────────────────
+          const box = boxAtPoint(dragPos.x, dragPos.y);
+          if (box) {
+            // No se puede sancionar suplentes: forzar cambio primero
+            if (!arrastradoEnCancha) {
+              alert(
+                "No podés sancionar a un suplente directamente.\n\n" +
+                "Primero hacé un cambio para meterlo a la cancha, confirmalo y después movelo al box de sanción."
+              );
+              setDraggingId(null);
+              setDragPos(null);
+              return;
+            }
+            // Aplicar sanción
+            aplicarSancion(draggingId, box);
+            setDraggingId(null);
+            setDragPos(null);
+            return;
+          }
 
           // 1. Buscar TITULAR más cercano (entre los que están en cancha)
           let titularCercano = null;
@@ -9835,15 +10022,37 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             }
             // Minutos por cuarto (cada uno es segundos → redondeo a minuto)
             const pc = (live.minutosPorCuarto || {})[jId] || { q1: 0, q2: 0, q3: 0, q4: 0 };
+            // Minutos suspendidos (segundos → minuto)
+            const minSusp = Math.round(((live.minutosSuspendidos || {})[jId] || 0) / 60);
+            // Info de sanciones aplicadas (solo el minuto inicio, no si volvió o no)
+            // Las sanciones pueden haber terminado hace rato y salido del state.sanciones.
+            // Para no perderlas, las recogemos también del "historial" (los cambios de estado)
+            // Como no llevamos un log completo, tomamos solo lo que quede en sanciones actuales
+            // + lo que haya estado guardado en state.sanciones. Suficiente para casos comunes.
+            const sancionActual = live.sanciones[jId] || null;
+            const updates = {
+              minutos_jugados: minutos,
+              entro_cuarto: entroCuarto,
+              min_q1: Math.round((pc.q1 || 0) / 60),
+              min_q2: Math.round((pc.q2 || 0) / 60),
+              min_q3: Math.round((pc.q3 || 0) / 60),
+              min_q4: Math.round((pc.q4 || 0) / 60),
+              minutos_suspendidos: minSusp,
+            };
+            if (sancionActual) {
+              if (sancionActual.color === "verde") {
+                updates.tarjeta_verde = true;
+                updates.minuto_tarjeta_verde = sancionActual.minutoInicio;
+              } else if (sancionActual.color === "amarilla") {
+                updates.tarjeta_amarilla = (r?.tarjeta_amarilla || 0) + 1;
+                updates.minuto_tarjeta_amarilla = sancionActual.minutoInicio;
+              } else if (sancionActual.color === "roja") {
+                updates.tarjeta_roja = true;
+                updates.minuto_tarjeta_roja = sancionActual.minutoInicio;
+              }
+            }
             await sb.from("fecha_jugadores")
-              .update({
-                minutos_jugados: minutos,
-                entro_cuarto: entroCuarto,
-                min_q1: Math.round((pc.q1 || 0) / 60),
-                min_q2: Math.round((pc.q2 || 0) / 60),
-                min_q3: Math.round((pc.q3 || 0) / 60),
-                min_q4: Math.round((pc.q4 || 0) / 60),
-              })
+              .update(updates)
               .eq("fecha_id", fecha.id)
               .eq("jugador_id", jId);
           }
@@ -10377,6 +10586,29 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
                 </text>
               )}
 
+              {/* Boxes de sanción (en la parte inferior de la columna derecha) */}
+              {BOXES.map((b, i) => {
+                const bx = SANCION_BOX_X;
+                const by = SANCION_START_Y + i * (SANCION_BOX_H + 2);
+                // Ver si hay un jugador sancionado con este boxKey (para resaltar)
+                const jugadorEnBox = sancionados.find(j => (state.sanciones[j.id]?.boxKey) === b.key);
+                const highlight = draggingId && !!state.formacionActual[draggingId]; // solo si arrastrás desde cancha
+                return (
+                  <g key={"box-"+b.key}>
+                    <rect x={bx} y={by} width={SANCION_BOX_W} height={SANCION_BOX_H}
+                      fill={jugadorEnBox ? `${b.color}30` : "rgba(255,255,255,0.03)"}
+                      stroke={highlight ? b.color : `${b.color}60`}
+                      strokeWidth={highlight ? 2 : 1}
+                      strokeDasharray={highlight && !jugadorEnBox ? "3 3" : ""}
+                      rx={4}/>
+                    <text x={bx + SANCION_BOX_W/2} y={by + 12} textAnchor="middle"
+                      fontSize={8} fontWeight={700} fill={b.color} fontFamily="var(--mono)" letterSpacing={0.5}>
+                      {b.label}
+                    </text>
+                  </g>
+                );
+              })}
+
               {/* Líneas de cambios pendientes */}
               {renderLineasCambio()}
 
@@ -10384,6 +10616,40 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               {enCancha.map(j => renderFicha(j, true))}
               {/* Suplentes */}
               {disponibles.map(j => renderFicha(j, false))}
+              {/* Sancionados (van encima de los boxes) */}
+              {sancionados.map(j => {
+                const sanc = liveValues.sanciones[j.id] || state.sanciones[j.id];
+                if (!sanc) return null;
+                const boxIdx = BOXES.findIndex(b => b.key === sanc.boxKey);
+                if (boxIdx < 0) return null;
+                const c = boxCenter(boxIdx);
+                const restante = typeof sanc.restante === "number" ? sanc.restante : null;
+                const mm = restante !== null ? Math.floor(restante / 60) : 0;
+                const ss = restante !== null ? Math.floor(restante % 60) : 0;
+                return (
+                  <g key={"sanc-"+j.id}>
+                    <circle cx={c.x - 12} cy={c.y} r={11} fill={BOXES[boxIdx].color} stroke="var(--bg)" strokeWidth={1.5}/>
+                    <text x={c.x - 12} y={c.y + 3} textAnchor="middle"
+                      fontSize={10} fontWeight={900} fontFamily="var(--mono)" fill="var(--bg)">
+                      {j.numero ?? "?"}
+                    </text>
+                    <text x={c.x + 12} y={c.y - 2} textAnchor="middle"
+                      fontSize={8} fontWeight={700} fill="var(--white)" fontFamily="var(--mono)">
+                      {(j.nombre || "").split(",")[0].split(" ")[0].slice(0, 5).toUpperCase()}
+                    </text>
+                    <text x={c.x + 12} y={c.y + 9} textAnchor="middle"
+                      fontSize={9} fontWeight={900} fill={BOXES[boxIdx].color} fontFamily="var(--mono)">
+                      {sanc.duracion === null ? "FIN" : `${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}`}
+                    </text>
+                    {/* Botón X para cancelar sanción manualmente */}
+                    <g style={{cursor:"pointer"}} onClick={() => cancelarSancion(j.id)}>
+                      <circle cx={c.x + SANCION_BOX_W/2 - 6} cy={c.y - SANCION_BOX_H/2 + 6} r={5} fill="rgba(0,0,0,0.4)"/>
+                      <text x={c.x + SANCION_BOX_W/2 - 6} y={c.y - SANCION_BOX_H/2 + 9} textAnchor="middle"
+                        fontSize={8} fill="var(--white)" fontFamily="var(--mono)">×</text>
+                    </g>
+                  </g>
+                );
+              })}
             </svg>
           </div>
 
