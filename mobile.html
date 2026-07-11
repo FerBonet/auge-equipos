@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1417">
+<title>Auge Equipos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;
+    line-height:1.5; overscroll-behavior-y:none;
+    transition:background .15s,color .15s;
+  }
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  .wrap{max-width:440px;margin:0 auto;min-height:100dvh;position:relative}
+
+  /* ---- Login ---- */
+  .center{min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;gap:20px}
+  .logo{width:76px;height:76px;border-radius:20px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:34px;color:var(--accent-on)}
+  .title-xl{font-size:22px;font-weight:800;margin:0;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:14px;margin:0;max-width:280px}
+  .btn-google{display:flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 22px;border-radius:14px;background:#fff;color:#1a1a1a;font-size:16px;font-weight:700;width:100%;max-width:320px}
+  .btn-google svg{width:20px;height:20px}
+
+  /* ---- Topbar ---- */
+  .topbar{display:flex;align-items:center;gap:12px;padding:16px 18px;padding-top:calc(16px + env(safe-area-inset-top))}
+  .h1{font-size:28px;font-weight:800;letter-spacing:-.02em;margin:0;flex:1}
+  .avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--p),var(--avatar2));flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px}
+  .screen-sub{font-size:12px;color:var(--muted);padding:0 18px;margin:-8px 0 4px}
+
+  /* ---- Category pill ---- */
+  .pill{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:7px 14px;height:34px;font-size:12px;color:var(--text);margin:0 18px 12px}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .pill .chev{color:var(--muted);font-size:11px}
+
+  /* ---- Filter chips ---- */
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:0 18px 14px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;padding:8px 15px;border-radius:20px;font-size:13px;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+  .chip.active{background:var(--accent);color:var(--accent-on);font-weight:700;border-color:var(--accent)}
+
+  .count{font-size:12px;color:var(--muted);padding:0 20px;margin:0 0 10px}
+
+  /* ---- Content / player rows ---- */
+  .content{padding:0 18px;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  .row{display:flex;align-items:center;gap:13px;background:var(--surface);border-radius:18px;padding:14px;margin-bottom:10px;box-shadow:0 2px 10px -5px rgba(18,38,46,.15)}
+  [data-mode="dark"] .row{box-shadow:none;border:1px solid var(--line)}
+  .numbadge{width:40px;height:40px;flex:0 0 auto;border-radius:12px;background:var(--num-bg);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:800;font-size:16px}
+  .pname{font-size:15px;font-weight:600}
+  .ppos{font-size:12px;color:var(--muted)}
+  .cap{width:22px;height:22px;flex:0 0 auto;border-radius:50%;background:var(--cap-bg);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .cardstack{display:flex;align-items:center;gap:3px}
+  .cardbox{width:15px;height:20px;border-radius:3px}
+  .addbtn{width:100%;border:1.5px dashed var(--line);border-radius:18px;padding:14px;color:var(--accent);font-size:14px;font-weight:700;text-align:center;margin-top:4px}
+
+  .empty{border:1px dashed var(--line);border-radius:16px;padding:40px 20px;text-align:center;color:var(--muted);margin-top:8px}
+  .empty b{color:var(--text)}
+
+  /* ---- Campeonato ---- */
+  .matchcard{background:var(--card);border-radius:20px;padding:18px;position:relative;overflow:hidden;color:#fff}
+  [data-mode="dark"] .matchcard{border:1px solid var(--line)}
+  [data-mode="dark"] .matchcard::after{content:"";position:absolute;top:-40px;right:-40px;width:160px;height:160px;background:radial-gradient(circle,var(--oc) 0%,transparent 70%);opacity:.28;pointer-events:none}
+  .matchlabel{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--oc)}
+  .matchrow{display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px;position:relative;z-index:1}
+  .crest{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff}
+  .crest.home{background:var(--accent)}
+  .crest.away{background:rgba(255,255,255,.12)}
+  .mtime{font-size:22px;font-weight:800}
+  .mfoot{font-size:12px;color:rgba(255,255,255,.75);position:relative;z-index:1}
+  .section-t{font-size:12px;color:var(--muted);font-weight:700;margin:20px 2px 10px}
+  .results{display:flex;gap:8px}
+  .rescard{flex:1;background:var(--surface);border-radius:14px;padding:12px;text-align:center}
+  [data-mode="dark"] .rescard{border:1px solid var(--line)}
+  .resscore{font-weight:800;font-size:16px}
+  .resriv{font-size:10px;color:var(--muted);margin-top:3px}
+  .standings{background:var(--surface);border-radius:18px;overflow:hidden}
+  [data-mode="dark"] .standings{border:1px solid var(--line)}
+  .strow{display:grid;grid-template-columns:26px 1fr 34px 40px;align-items:center;padding:12px 15px;font-size:13px;border-bottom:1px solid var(--line)}
+  .strow:last-child{border-bottom:none}
+  .sthead{font-size:10.5px;color:var(--muted);font-weight:700}
+  .sthead .pts,.strow .pts{text-align:right}
+  .sthead .pts{color:var(--accent)}
+  .strow.me{background:var(--num-bg);border-left:3px solid var(--accent)}
+  .strow.me .pos,.strow.me .pts{color:var(--accent);font-weight:800}
+
+  /* ---- Config ---- */
+  .cfg-t{font-size:13px;color:var(--muted);margin:18px 2px 10px;font-weight:700}
+  .swatches{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .sw{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;transition:border-color .15s}
+  .sw.active{border-color:var(--accent);border-width:2px}
+  .sw-colors{display:flex;gap:3px}
+  .sw-c{width:14px;height:14px;border-radius:4px}
+  .sw-name{font-size:12px;color:var(--text);text-align:left;line-height:1.2}
+  .modetoggle{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px;gap:4px}
+  .modebtn{flex:1;padding:10px;border-radius:10px;font-size:14px;font-weight:600;color:var(--muted);min-height:44px}
+  .modebtn.active{background:var(--accent);color:var(--accent-on);font-weight:700}
+  .cfg-mail{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;font-size:13px;color:var(--muted)}
+  .cfg-mail b{color:var(--text);font-weight:600}
+  .logout{width:100%;border:1px solid var(--line);border-radius:14px;padding:14px;color:var(--result-lose);font-size:14px;font-weight:700;margin-top:14px;min-height:48px}
+
+  /* ---- Bottom nav ---- */
+  .bottomnav{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:440px;z-index:30;background:var(--navbg);border-top:1px solid var(--line);display:flex;height:calc(68px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom)}
+  .navitem{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--navmuted);font-size:10.5px;min-height:44px}
+  .navitem svg{width:24px;height:24px}
+  .navitem.active{color:var(--accent);font-weight:700}
+  .navitem.active .navico{background:var(--accent);color:var(--accent-on);border-radius:7px}
+  .navico{width:34px;height:26px;display:flex;align-items:center;justify-content:center}
+
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .sheet-bg{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
+  .sheet{background:var(--surface);width:100%;max-width:440px;margin:0 auto;border-radius:20px 20px 0 0;padding:8px 0 calc(16px + env(safe-area-inset-bottom));max-height:70dvh;overflow:auto}
+  .sheet h3{margin:16px 20px 8px;font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+  .eq-row{display:flex;align-items:center;gap:12px;padding:15px 20px;font-size:15px;width:100%;text-align:left;border-bottom:1px solid var(--line);min-height:56px}
+  .eq-row.sel{color:var(--accent);font-weight:700}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ============ CONFIG ============ */
+const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
+// Clave pública (publishable) de Supabase — segura para el cliente, respeta RLS.
+const SUPABASE_ANON_KEY = "sb_publishable_dDCOsKQHaX14Dyw2B31gAQ_-lg2-bni";
+/* ================================ */
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ============ TEMA (paletas del club) ============ */
+const PALETTES = {
+  celeste:  { name:"Celeste, azul y blanco", p:"#1B7FC4", p2:"#5FB8E8", soft:"#E3F1FA", card:"#123A5C", oc:"#8FD3F5" },
+  amarillo: { name:"Amarillo y azul",        p:"#1D3F9E", p2:"#F2C500", soft:"#E5E9F6", card:"#12275F", oc:"#F2C500" },
+  rojo:     { name:"Blanco y rojo",          p:"#D22F35", p2:"#2C2C30", soft:"#FBE4E4", card:"#1E1E20", oc:"#FF8F93" },
+  verde:    { name:"Verde y blanco",         p:"#1F8A5B", p2:"#F0A83E", soft:"#E4F3EB", card:"#13351F", oc:"#7FD0A8" },
+  bordo:    { name:"Bordó y oro",            p:"#7C1F2E", p2:"#C79A3A", soft:"#F3E6E8", card:"#2A1015", oc:"#E0C06A" },
+  negro:    { name:"Negro y naranja",        p:"#26262B", p2:"#F07A22", soft:"#ECECEE", card:"#141416", oc:"#F07A22" },
+  turquesa: { name:"Turquesa y coral",       p:"#0E8C8C", p2:"#F2704E", soft:"#E1F0F0", card:"#16344B", oc:"#4FD0CD" },
+};
+const NEUTRAL = {
+  light:{ bg:"#EEF3F3", surface:"#FFFFFF", text:"#12262E", text2:"#4a5b62", muted:"#6C818A", line:"#E0E8E8", navmuted:"#93a3a8", navbg:"#FFFFFF" },
+  dark: { bg:"#0E1417", surface:"#171E22", text:"#EAF0F2", text2:"#b7c3c9", muted:"#8494A0", line:"rgba(255,255,255,.07)", navmuted:"#5f6f6a", navbg:"#080C0D" },
+};
+function applyTheme(paletteKey, mode){
+  const pal = PALETTES[paletteKey] || PALETTES.celeste;
+  const n = NEUTRAL[mode] || NEUTRAL.dark;
+  const dark = mode === "dark";
+  const s = document.documentElement.style;
+  s.setProperty("--p", pal.p); s.setProperty("--p2", pal.p2); s.setProperty("--soft", pal.soft);
+  s.setProperty("--card", pal.card); s.setProperty("--oc", pal.oc);
+  s.setProperty("--bg", n.bg); s.setProperty("--surface", n.surface); s.setProperty("--text", n.text);
+  s.setProperty("--text2", n.text2); s.setProperty("--muted", n.muted); s.setProperty("--line", n.line);
+  s.setProperty("--navmuted", n.navmuted); s.setProperty("--navbg", n.navbg);
+  s.setProperty("--accent", dark ? pal.oc : pal.p);
+  s.setProperty("--accent-on", dark ? "#0C1114" : "#FFFFFF");
+  s.setProperty("--avatar2", dark ? pal.oc : pal.p2);
+  s.setProperty("--num-bg", dark ? "rgba(255,255,255,.06)" : pal.soft);
+  s.setProperty("--cap-bg", dark ? "#E8B23E" : pal.p2);
+  s.setProperty("--amarilla", "#E8B23E");
+  s.setProperty("--roja", dark ? "#E85555" : "#E0483C");
+  s.setProperty("--result-win", dark ? pal.oc : pal.p);
+  s.setProperty("--result-draw", "#E0A83E");
+  s.setProperty("--result-lose", dark ? "#E85555" : "#E0483C");
+  document.documentElement.setAttribute("data-mode", mode);
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", n.bg);
+}
+
+/* ============ Iconos nav ============ */
+const NAV = [
+  { id:"plantilla",     label:"Plantilla",     d:"M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0" },
+  { id:"campeonato",    label:"Campeonato",    d:"M6 9a6 6 0 0012 0V4H6v5zM4 4h2m12 0h2M9 18h6m-3-3v3" },
+  { id:"entrenamiento", label:"Entrenamiento", d:"M4 12h16M7 8v8m10-8v8" },
+  { id:"config",        label:"Config",        d:"M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14 2h-4l-.8 2.4a7 7 0 00-1.7 1l-2.4-1-2 3.4L3.1 11a7 7 0 000 2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1L10 22h4l.8-2.4a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6a7 7 0 00.1-1z" },
+];
+function Ico({ d }){ return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>; }
+const initials = (s) => (s||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+
+/* ============ Login ============ */
+function Login(){
+  const [loading,setLoading]=useState(false);
+  const entrar=async()=>{ setLoading(true); await db.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.href.split("#")[0] } }); };
+  return (
+    <div className="center">
+      <div className="logo">A</div>
+      <div><h1 className="title-xl">Auge Equipos</h1><p className="sub">Ingresá para ver tus equipos.</p></div>
+      <button className="btn-google" onClick={entrar} disabled={loading}>
+        <svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.8-6.8C35.6 2.4 30.1 0 24 0 14.6 0 6.4 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.6 6.9l7.1 5.5c4.1-3.8 6.5-9.4 6.5-16.9z"/><path fill="#FBBC05" d="M10.5 28.3a14.5 14.5 0 010-9.2l-7.9-6.1a24 24 0 000 21.4l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.1 0 11.3-2 15-5.5l-7.1-5.5c-2 1.3-4.6 2.1-7.9 2.1-6.3 0-11.6-3.8-13.5-9.3l-7.9 6.1C6.4 42.6 14.6 48 24 48z"/></svg>
+        {loading ? "Redirigiendo…" : "Ingresar con Google"}
+      </button>
+    </div>
+  );
+}
+
+/* ============ Plantilla (datos reales) ============ */
+function Plantilla({ equipo, email, multi, onOpenPicker }){
+  const [players,setPlayers]=useState(null);
+  const [filtro,setFiltro]=useState("Todos");
+
+  useEffect(()=>{
+    setPlayers(null);
+    db.from("jugadores").select("id,numero,nombre,apodo,posicion,es_capitan,estado")
+      .eq("club_id", equipo.id).order("numero",{ nullsFirst:false })
+      .then(({data,error})=>{ if(error){console.error(error);setPlayers([]);return;} setPlayers(data||[]); });
+  },[equipo.id]);
+
+  if(players===null) return <div className="center"><div className="spinner"/></div>;
+
+  const posiciones = [...new Set(players.map(p=>p.posicion).filter(Boolean))];
+  const chips = ["Todos", ...posiciones];
+  const lista = filtro==="Todos" ? players : players.filter(p=>p.posicion===filtro);
+
+  return (
+    <div>
+      <div className="topbar"><h1 className="h1">Plantilla</h1><div className="avatar">{initials(email)}</div></div>
+      <button className="pill" onClick={()=> multi && onOpenPicker()} style={{cursor: multi?"pointer":"default"}}><span className="dot"/>{equipo.nombre}{multi && <span className="chev">▾</span>}</button>
+      <div className="chips">
+        {chips.map(c=>(
+          <button key={c} className={"chip"+(c===filtro?" active":"")} onClick={()=>setFiltro(c)}>{c}</button>
+        ))}
+      </div>
+      <div className="count">{lista.length} {lista.length===1?"jugador":"jugadores"}</div>
+      <div className="content">
+        {lista.length===0
+          ? <div className="empty"><b>Sin jugadores</b><br/>Todavía no hay jugadores cargados en este equipo.</div>
+          : lista.map(p=>(
+            <div className="row" key={p.id}>
+              <div className="numbadge">{p.numero ?? "—"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div className="pname">{p.nombre || p.apodo || "Sin nombre"}</div>
+                <div className="ppos">{p.posicion || "—"}</div>
+              </div>
+              {p.es_capitan && <div className="cap">C</div>}
+            </div>
+          ))
+        }
+        <button className="addbtn">+ Agregar jugador</button>
+      </div>
+    </div>
+  );
+}
+
+/* ============ Campeonato (datos de ejemplo del mock — pendiente de cablear a fechas) ============ */
+function Campeonato({ email }){
+  const results = [
+    { score:"3–1", riv:"Quilmes",   c:"var(--result-win)"  },
+    { score:"2–2", riv:"Lomas",     c:"var(--result-draw)" },
+    { score:"0–1", riv:"B. Nación", c:"var(--result-lose)" },
+  ];
+  const tabla = [
+    { pos:1, eq:"Banco Nación", pj:12, pts:30, me:false },
+    { pos:2, eq:"Del Sur",      pj:12, pts:27, me:true  },
+    { pos:3, eq:"Vélez",        pj:12, pts:23, me:false },
+    { pos:4, eq:"GEBA",         pj:12, pts:20, me:false },
+  ];
+  return (
+    <div>
+      <div className="topbar"><h1 className="h1">Campeonato</h1><div className="avatar">{initials(email)}</div></div>
+      <div className="screen-sub">Apertura 2026 · Zona A</div>
+      <div className="content">
+        <div className="matchcard">
+          <div className="matchlabel">Próximo partido</div>
+          <div className="matchrow">
+            <div className="crest home">DS</div>
+            <div className="mtime">15:30</div>
+            <div className="crest away">BN</div>
+          </div>
+          <div className="mfoot">Sáb 18 Jul · Cancha 1</div>
+        </div>
+
+        <div className="section-t">Últimos resultados</div>
+        <div className="results">
+          {results.map((r,i)=>(
+            <div className="rescard" key={i} style={{borderBottom:"3px solid "+r.c}}>
+              <div className="resscore">{r.score}</div>
+              <div className="resriv">{r.riv}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="section-t">Tabla de posiciones</div>
+        <div className="standings">
+          <div className="strow sthead"><span className="pos">#</span><span>Equipo</span><span>PJ</span><span className="pts">Pts</span></div>
+          {tabla.map(t=>(
+            <div className={"strow"+(t.me?" me":"")} key={t.pos}>
+              <span className="pos">{t.pos}</span><span>{t.eq}</span><span>{t.pj}</span><span className="pts">{t.pts}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============ Placeholder tabs ============ */
+function Placeholder({ titulo, email }){
+  return (
+    <div>
+      <div className="topbar"><h1 className="h1">{titulo}</h1><div className="avatar">{initials(email)}</div></div>
+      <div className="content"><div className="empty"><b>En construcción</b><br/>Esta sección la armamos en los próximos pasos.</div></div>
+    </div>
+  );
+}
+
+/* ============ Configuración (paleta + modo) ============ */
+function Config({ email, palette, mode, onPalette, onMode }){
+  return (
+    <div>
+      <div className="topbar"><h1 className="h1">Configuración</h1><div className="avatar">{initials(email)}</div></div>
+      <div className="content">
+        <div className="cfg-t">MODO</div>
+        <div className="modetoggle">
+          <button className={"modebtn"+(mode==="light"?" active":"")} onClick={()=>onMode("light")}>Claro</button>
+          <button className={"modebtn"+(mode==="dark"?" active":"")} onClick={()=>onMode("dark")}>Oscuro</button>
+        </div>
+
+        <div className="cfg-t">PALETA DEL CLUB</div>
+        <div className="swatches">
+          {Object.entries(PALETTES).map(([k,pal])=>(
+            <button key={k} className={"sw"+(k===palette?" active":"")} onClick={()=>onPalette(k)}>
+              <div className="sw-colors">
+                <span className="sw-c" style={{background:pal.p}}/>
+                <span className="sw-c" style={{background:pal.p2}}/>
+                <span className="sw-c" style={{background:pal.oc}}/>
+              </div>
+              <span className="sw-name">{pal.name}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="cfg-t">CUENTA</div>
+        <div className="cfg-mail">Sesión iniciada como <b>{email}</b></div>
+        <button className="logout" onClick={()=>db.auth.signOut()}>Cerrar sesión</button>
+      </div>
+    </div>
+  );
+}
+
+/* ============ App ============ */
+function App({ session }){
+  const email = session.user.email;
+  const [equipos,setEquipos]=useState(null);
+  const [equipoSel,setEquipoSel]=useState(()=>localStorage.getItem("mobile_equipo")||null);
+  const [tab,setTab]=useState(()=>localStorage.getItem("mobile_tab")||"plantilla");
+  const [pickerOpen,setPickerOpen]=useState(false);
+  const [palette,setPalette]=useState(()=>localStorage.getItem("mobile_palette")||"celeste");
+  const [mode,setMode]=useState(()=>localStorage.getItem("mobile_mode")||"dark");
+
+  useEffect(()=>{ applyTheme(palette,mode); localStorage.setItem("mobile_palette",palette); localStorage.setItem("mobile_mode",mode); },[palette,mode]);
+  useEffect(()=>{ if(equipoSel) localStorage.setItem("mobile_equipo",equipoSel); },[equipoSel]);
+  useEffect(()=>{ localStorage.setItem("mobile_tab",tab); },[tab]);
+
+  useEffect(()=>{
+    db.from("clubs").select("id,nombre,categoria").order("nombre").then(({data,error})=>{
+      if(error){console.error(error);setEquipos([]);return;}
+      setEquipos(data||[]);
+      if((data||[]).length && !(data||[]).find(e=>e.id===equipoSel)) setEquipoSel(data[0].id);
+    });
+  },[]);
+
+  if(equipos===null) return <div className="center"><div className="spinner"/></div>;
+
+  if(equipos.length===0) return (
+    <div className="center">
+      <div className="logo" style={{background:"var(--surface)"}}>A</div>
+      <div><h1 className="title-xl">Sin equipos todavía</h1><p className="sub">Tu cuenta ({email}) aún no tiene equipos asignados.</p></div>
+      <button className="logout" style={{maxWidth:220}} onClick={()=>db.auth.signOut()}>Cerrar sesión</button>
+    </div>
+  );
+
+  const equipo = equipos.find(e=>e.id===equipoSel) || equipos[0];
+
+  return (
+    <div className="wrap">
+      {tab==="plantilla"     && <Plantilla equipo={equipo} email={email} multi={equipos.length>1} onOpenPicker={()=>setPickerOpen(true)}/>}
+      {tab==="campeonato"    && <Campeonato email={email}/>}
+      {tab==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
+      {tab==="config"        && <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode}/>}
+
+      <nav className="bottomnav">
+        {NAV.map(n=>(
+          <button key={n.id} className={"navitem"+(n.id===tab?" active":"")} onClick={()=>setTab(n.id)}>
+            <span className="navico"><Ico d={n.d}/></span><span>{n.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {pickerOpen && (
+        <div className="sheet-bg" onClick={()=>setPickerOpen(false)}>
+          <div className="sheet" onClick={e=>e.stopPropagation()}>
+            <h3>ELEGIR EQUIPO</h3>
+            {equipos.map(e=>(
+              <button key={e.id} className={"eq-row"+(e.id===equipo.id?" sel":"")} onClick={()=>{setEquipoSel(e.id);setPickerOpen(false);}}>
+                <span style={{flex:1}}>{e.nombre}<br/><span style={{fontSize:12,color:"var(--muted)"}}>{e.categoria||"—"}</span></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Root(){
+  const [session,setSession]=useState(undefined);
+  useEffect(()=>{ applyTheme(localStorage.getItem("mobile_palette")||"celeste", localStorage.getItem("mobile_mode")||"dark"); },[]);
+  useEffect(()=>{
+    db.auth.getSession().then(({data})=>setSession(data.session));
+    const { data:sub }=db.auth.onAuthStateChange((_e,s)=>setSession(s));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
+  if(session===undefined) return <div className="center"><div className="spinner"/></div>;
+  if(!session) return <Login/>;
+  return <App session={session}/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
