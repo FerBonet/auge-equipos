@@ -123,6 +123,21 @@
   .sheet h3{margin:16px 20px 8px;font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
   .eq-row{display:flex;align-items:center;gap:12px;padding:15px 20px;font-size:15px;width:100%;text-align:left;border-bottom:1px solid var(--line);min-height:56px}
   .eq-row.sel{color:var(--accent);font-weight:700}
+
+  /* ---- Panel coordinador ---- */
+  .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .metric{background:var(--surface);border-radius:18px;padding:16px;box-shadow:0 2px 10px -5px rgba(18,38,46,.15)}
+  [data-mode="dark"] .metric{box-shadow:none;border:1px solid var(--line)}
+  .metric-l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+  .metric-v{font-size:28px;font-weight:800;letter-spacing:-.02em;color:var(--accent);margin-top:4px;line-height:1}
+  .metric-s{font-size:11px;color:var(--muted);margin-top:4px}
+  .bars{display:flex;align-items:flex-end;justify-content:space-around;gap:8px;height:120px;background:var(--surface);border-radius:18px;padding:16px}
+  [data-mode="dark"] .bars{border:1px solid var(--line)}
+  .barcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;justify-content:flex-end;height:100%}
+  .bar{width:60%;max-width:34px;background:var(--accent);border-radius:6px 6px 0 0;min-height:6px}
+  .barlbl{font-size:11px;color:var(--muted)}
+  .trainrow{display:flex;align-items:center;gap:12px;background:var(--surface);border-radius:14px;padding:14px;margin-bottom:8px;border-left:3px solid var(--accent)}
+  [data-mode="dark"] .trainrow{border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -176,14 +191,22 @@ function applyTheme(paletteKey, mode){
 }
 
 /* ============ Iconos nav ============ */
-const NAV = [
-  { id:"plantilla",     label:"Plantilla",     d:"M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0" },
-  { id:"campeonato",    label:"Campeonato",    d:"M6 9a6 6 0 0012 0V4H6v5zM4 4h2m12 0h2M9 18h6m-3-3v3" },
-  { id:"entrenamiento", label:"Entrenamiento", d:"M4 12h16M7 8v8m10-8v8" },
-  { id:"config",        label:"Config",        d:"M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14 2h-4l-.8 2.4a7 7 0 00-1.7 1l-2.4-1-2 3.4L3.1 11a7 7 0 000 2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1L10 22h4l.8-2.4a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6a7 7 0 00.1-1z" },
-];
+const NAV_ALL = {
+  panel:         { label:"Panel",         d:"M4 13h6V4H4v9zm0 7h6v-5H4v5zm10 0h6V11h-6v9zm0-16v5h6V4h-6z" },
+  plantilla:     { label:"Plantilla",     d:"M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0" },
+  campeonato:    { label:"Campeonato",    d:"M6 9a6 6 0 0012 0V4H6v5zM4 4h2m12 0h2M9 18h6m-3-3v3" },
+  entrenamiento: { label:"Entrenamiento", d:"M4 12h16M7 8v8m10-8v8" },
+  config:        { label:"Config",        d:"M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14 2h-4l-.8 2.4a7 7 0 00-1.7 1l-2.4-1-2 3.4L3.1 11a7 7 0 000 2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1L10 22h4l.8-2.4a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6a7 7 0 00.1-1z" },
+};
 function Ico({ d }){ return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>; }
 const initials = (s) => (s||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+const DIAS = ["Do","Lu","Ma","Mi","Ju","Vi","Sá"];
+const MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+function fmtFecha(iso){
+  if(!iso) return "—";
+  const d = new Date(iso+"T12:00:00");
+  return DIAS[d.getDay()]+" "+d.getDate()+" "+MESES[d.getMonth()];
+}
 
 /* ============ Login ============ */
 function Login(){
@@ -345,31 +368,114 @@ function Config({ email, palette, mode, onPalette, onMode }){
   );
 }
 
+/* ============ Panel del coordinador (datos reales) ============ */
+function PanelCoordinador({ clubeId, email }){
+  const [data,setData]=useState(null);
+  useEffect(()=>{
+    if(!clubeId){ setData({}); return; }
+    setData(null);
+    db.rpc("panel_coordinador",{ p_clube_id: clubeId }).then(({data,error})=>{
+      if(error){ console.error(error); setData({error:true}); return; }
+      setData(data||{});
+    });
+  },[clubeId]);
+
+  if(data===null) return <div className="center"><div className="spinner"/></div>;
+
+  const hoy = new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"});
+  const sem = data.asistencia_semanal || [];
+  const maxPct = Math.max(100, ...sem.map(s=>s.pct||0));
+  const prox = data.proximo_partido;
+  const ent = data.entrenamientos_hoy || [];
+
+  return (
+    <div>
+      <div className="topbar"><h1 className="h1">Panel</h1><div className="avatar">{initials(email)}</div></div>
+      <div className="screen-sub" style={{textTransform:"capitalize"}}>{hoy} · Temporada 2026</div>
+      <div className="content">
+        <div className="metrics">
+          <div className="metric"><div className="metric-l">Jugadores</div><div className="metric-v">{data.jugadores ?? "—"}</div></div>
+          <div className="metric"><div className="metric-l">Categorías</div><div className="metric-v">{data.categorias ?? "—"}</div></div>
+          <div className="metric"><div className="metric-l">Asistencia media</div><div className="metric-v">{data.asistencia_media!=null ? data.asistencia_media+"%" : "—"}</div><div className="metric-s">últimas 4 semanas</div></div>
+          <div className="metric"><div className="metric-l">Cuotas al día</div><div className="metric-v" style={{color:"var(--muted)"}}>—</div><div className="metric-s">próximamente</div></div>
+        </div>
+
+        <div className="section-t">Próximo partido</div>
+        {prox ? (
+          <div className="matchcard">
+            <div className="matchlabel">{prox.equipo || "Próximo partido"}</div>
+            <div className="matchrow">
+              <div className="crest home">GE</div>
+              <div className="mtime">{(prox.kick_time||"").slice(0,5) || "—"}</div>
+              <div className="crest away">{initials(prox.rival||"?")}</div>
+            </div>
+            <div className="mfoot">{fmtFecha(prox.fecha_date)}{prox.location? " · "+prox.location:""}{prox.rival? " · vs "+prox.rival:""}</div>
+          </div>
+        ) : <div className="empty">Sin partidos próximos cargados.</div>}
+
+        <div className="section-t">Asistencia semanal</div>
+        {sem.length ? (
+          <div className="bars">
+            {sem.map((s,i)=>(
+              <div className="barcol" key={i}>
+                <div className="bar" style={{height:Math.max(6,((s.pct||0)/maxPct)*88)+"px"}}/>
+                <div className="barlbl">{DIAS[s.dow] || "?"}</div>
+              </div>
+            ))}
+          </div>
+        ) : <div className="empty">Sin datos de asistencia todavía.</div>}
+
+        <div className="section-t">Entrenamientos de hoy</div>
+        {ent.length ? ent.map((e,i)=>(
+          <div className="trainrow" key={i}>
+            <div style={{flex:1,minWidth:0}}>
+              <div className="pname">{e.titulo || "Entrenamiento"}</div>
+              <div className="ppos">{e.equipo}{e.notas? " · "+e.notas:""}</div>
+            </div>
+          </div>
+        )) : <div className="empty">No hay entrenamientos hoy.</div>}
+      </div>
+    </div>
+  );
+}
+
 /* ============ App ============ */
 function App({ session }){
   const email = session.user.email;
-  const [equipos,setEquipos]=useState(null);
+  const [accesos,setAccesos]=useState(null);
   const [equipoSel,setEquipoSel]=useState(()=>localStorage.getItem("mobile_equipo")||null);
-  const [tab,setTab]=useState(()=>localStorage.getItem("mobile_tab")||"plantilla");
+  const [tab,setTab]=useState(()=>localStorage.getItem("mobile_tab")||"");
   const [pickerOpen,setPickerOpen]=useState(false);
   const [palette,setPalette]=useState(()=>localStorage.getItem("mobile_palette")||"celeste");
   const [mode,setMode]=useState(()=>localStorage.getItem("mobile_mode")||"dark");
 
   useEffect(()=>{ applyTheme(palette,mode); localStorage.setItem("mobile_palette",palette); localStorage.setItem("mobile_mode",mode); },[palette,mode]);
   useEffect(()=>{ if(equipoSel) localStorage.setItem("mobile_equipo",equipoSel); },[equipoSel]);
-  useEffect(()=>{ localStorage.setItem("mobile_tab",tab); },[tab]);
+  useEffect(()=>{ if(tab) localStorage.setItem("mobile_tab",tab); },[tab]);
 
   useEffect(()=>{
-    db.from("clubs").select("id,nombre,categoria").order("nombre").then(({data,error})=>{
-      if(error){console.error(error);setEquipos([]);return;}
-      setEquipos(data||[]);
-      if((data||[]).length && !(data||[]).find(e=>e.id===equipoSel)) setEquipoSel(data[0].id);
+    db.rpc("mis_accesos").then(({data,error})=>{
+      if(error){ console.error(error); setAccesos({equipos:[],clubes:[],super_admin:false}); return; }
+      setAccesos(data||{equipos:[],clubes:[]});
     });
   },[]);
 
-  if(equipos===null) return <div className="center"><div className="spinner"/></div>;
+  useEffect(()=>{
+    if(!accesos) return;
+    const eqs = accesos.equipos || [];
+    if(eqs.length && !eqs.find(e=>e.id===equipoSel)) setEquipoSel(eqs[0].id);
+  },[accesos]);
 
-  if(equipos.length===0) return (
+  if(accesos===null) return <div className="center"><div className="spinner"/></div>;
+
+  const equipos = accesos.equipos || [];
+  const esCoord = !!accesos.super_admin || (accesos.clubes||[]).length>0;
+  const clubeId = (accesos.clubes||[])[0]?.id || equipos[0]?.clube_id || null;
+  const navOrder = esCoord ? ["panel","plantilla","campeonato","config"]
+                           : ["plantilla","campeonato","entrenamiento","config"];
+  const tabActual = navOrder.includes(tab) ? tab : navOrder[0];
+
+  if(!esCoord && equipos.length===0) return (
     <div className="center">
       <div className="logo" style={{background:"var(--surface)"}}>A</div>
       <div><h1 className="title-xl">Sin equipos todavía</h1><p className="sub">Tu cuenta ({email}) aún no tiene equipos asignados.</p></div>
@@ -377,21 +483,22 @@ function App({ session }){
     </div>
   );
 
-  const equipo = equipos.find(e=>e.id===equipoSel) || equipos[0];
+  const equipo = equipos.find(e=>e.id===equipoSel) || equipos[0] || null;
 
   return (
     <div className="wrap">
-      {tab==="plantilla"     && <Plantilla equipo={equipo} email={email} multi={equipos.length>1} onOpenPicker={()=>setPickerOpen(true)}/>}
-      {tab==="campeonato"    && <Campeonato email={email}/>}
-      {tab==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
-      {tab==="config"        && <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode}/>}
+      {tabActual==="panel"         && <PanelCoordinador clubeId={clubeId} email={email}/>}
+      {tabActual==="plantilla"     && (equipo ? <Plantilla equipo={equipo} email={email} multi={equipos.length>1} onOpenPicker={()=>setPickerOpen(true)}/> : <Placeholder titulo="Plantilla" email={email}/>)}
+      {tabActual==="campeonato"    && <Campeonato email={email}/>}
+      {tabActual==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
+      {tabActual==="config"        && <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode}/>}
 
       <nav className="bottomnav">
-        {NAV.map(n=>(
-          <button key={n.id} className={"navitem"+(n.id===tab?" active":"")} onClick={()=>setTab(n.id)}>
+        {navOrder.map(id=>{ const n=NAV_ALL[id]; return (
+          <button key={id} className={"navitem"+(id===tabActual?" active":"")} onClick={()=>setTab(id)}>
             <span className="navico"><Ico d={n.d}/></span><span>{n.label}</span>
           </button>
-        ))}
+        );})}
       </nav>
 
       {pickerOpen && (
@@ -399,7 +506,7 @@ function App({ session }){
           <div className="sheet" onClick={e=>e.stopPropagation()}>
             <h3>ELEGIR EQUIPO</h3>
             {equipos.map(e=>(
-              <button key={e.id} className={"eq-row"+(e.id===equipo.id?" sel":"")} onClick={()=>{setEquipoSel(e.id);setPickerOpen(false);}}>
+              <button key={e.id} className={"eq-row"+(e.id===(equipo&&equipo.id)?" sel":"")} onClick={()=>{setEquipoSel(e.id);setPickerOpen(false);}}>
                 <span style={{flex:1}}>{e.nombre}<br/><span style={{fontSize:12,color:"var(--muted)"}}>{e.categoria||"—"}</span></span>
               </button>
             ))}
