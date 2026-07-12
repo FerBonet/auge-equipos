@@ -254,15 +254,16 @@ function fmtFecha(iso){
   const d = new Date(iso+"T12:00:00");
   return DIAS[d.getDay()]+" "+d.getDate()+" "+MESES[d.getMonth()];
 }
-const DIVISIONES = ["10ma","9na","8va","7ma","6ta","5ta","PS"];
+const DIVISIONES = ["10ma","9na","8va","7ma","6ta","5ta","Intermedia","Primera"];
+const DIV_SIGLA = { "Intermedia":"INT", "Primera":"1ra" };
 const ramaAbbr = (r)=> r==="Damas"?"Dam":r==="Caballeros"?"Cab":"";
-const divNum   = (d)=> d==="PS"?"PS":(d||"").replace(/[^0-9]/g,"");
+const divNum   = (d)=> !d ? "" : (DIV_SIGLA[d] || d.replace(/[^0-9]/g,""));
 function genSigla(division,tira,rama){
   if(!division) return "";
   return (divNum(division)+(tira||"")+(ramaAbbr(rama)?" "+ramaAbbr(rama):"")).trim();
 }
 function tiraOpts(rama,division){
-  if(rama==="Caballeros") return division==="PS" ? ["A","B","C"] : ["A","B"];
+  if(rama==="Caballeros") return (division==="Primera"||division==="Intermedia") ? ["A","B","C"] : ["A","B"];
   return ["A","B","C","D"]; // Damas o sin definir
 }
 const labelEquipo  = (e)=> e.division ? (e.division+(e.tira?" "+e.tira:"")).trim() : (e.categoria||e.nombre||"Equipo");
@@ -494,14 +495,15 @@ function Placeholder({ titulo, email }){
 }
 
 /* ============ Configuración (paleta + modo + gestión) ============ */
-function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos }){
+function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos, onOpenEspacios }){
   return (
     <div>
       <div className="topbar"><h1 className="h1">Configuración</h1><div className="avatar">{initials(email)}</div></div>
       <div className="content">
         {esCoord && <>
           <div className="cfg-t">GESTIÓN DEL CLUB</div>
-          <button className="cfg-row" onClick={onOpenEquipos}>Equipos del club<span className="chev">›</span></button>
+          <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenEquipos}>Equipos del club<span className="chev">›</span></button>
+          <button className="cfg-row" onClick={onOpenEspacios}>Espacios y turnos<span className="chev">›</span></button>
         </>}
 
         <div className="cfg-t">MODO</div>
@@ -638,6 +640,165 @@ function EquiposManager({ clubeId, clubNombre, onBack }){
   );
 }
 
+/* ============ Espacios y turnos ============ */
+const SUBDIV = {1:"Entera",2:"Medias",3:"Tercios",4:"Cuartos"};
+function EspaciosTurnosManager({ clubeId, clubNombre, onBack }){
+  const [espacios,setEspacios]=useState(null);
+  const [turnos,setTurnos]=useState(null);
+  const [edEsp,setEdEsp]=useState(null);   // edición de cancha
+  const [edTur,setEdTur]=useState(null);   // edición de turno
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState(null);
+
+  const cargar=()=>{
+    db.from("espacios").select("id,nombre,alias,subdivisiones,activo,es_default,orden")
+      .eq("clube_id",clubeId).order("orden").then(({data})=>setEspacios(data||[]));
+    db.from("turnos").select("id,hora_inicio,hora_fin,orden,activo")
+      .eq("clube_id",clubeId).order("hora_inicio").then(({data})=>setTurnos(data||[]));
+  };
+  useEffect(cargar,[clubeId]);
+
+  const hhmm=(t)=> (t||"").slice(0,5);
+
+  // ---- canchas ----
+  const guardarEsp=async()=>{
+    const f=edEsp;
+    if(!f.nombre || !f.nombre.trim()){ setErr("Poné un nombre para la cancha."); return; }
+    setBusy(true); setErr(null);
+    if(f.es_default){
+      await db.from("espacios").update({es_default:false}).eq("clube_id",clubeId).neq("id", f.id||"00000000-0000-0000-0000-000000000000");
+    }
+    const payload={ nombre:f.nombre.trim(), alias:(f.alias||"").trim()||null, subdivisiones:f.subdivisiones||2, activo:f.activo!==false, es_default:!!f.es_default };
+    let res = f.id
+      ? await db.from("espacios").update(payload).eq("id",f.id)
+      : await db.from("espacios").insert({...payload, clube_id:clubeId, orden:(espacios||[]).length});
+    setBusy(false);
+    if(res.error){ setErr("No se pudo guardar. "+(res.error.message||"")); return; }
+    setEdEsp(null); cargar();
+  };
+  const borrarEsp=async(e)=>{
+    if(!window.confirm("¿Borrar la cancha \""+(e.alias||e.nombre)+"\"? Se quitarán sus asignaciones de la grilla.")) return;
+    setBusy(true);
+    const res=await db.from("espacios").delete().eq("id",e.id);
+    setBusy(false);
+    if(res.error){ setErr("No se pudo borrar. "+(res.error.message||"")); return; }
+    setEdEsp(null); cargar();
+  };
+
+  // ---- turnos ----
+  const guardarTur=async()=>{
+    const f=edTur;
+    if(!f.hora_inicio || !f.hora_fin){ setErr("Completá hora de inicio y fin."); return; }
+    if(f.hora_fin <= f.hora_inicio){ setErr("La hora de fin tiene que ser posterior al inicio."); return; }
+    setBusy(true); setErr(null);
+    const payload={ hora_inicio:f.hora_inicio, hora_fin:f.hora_fin, activo:true };
+    let res = f.id
+      ? await db.from("turnos").update(payload).eq("id",f.id)
+      : await db.from("turnos").insert({...payload, clube_id:clubeId, orden:(turnos||[]).length});
+    setBusy(false);
+    if(res.error){ setErr("No se pudo guardar. "+(res.error.message||"")); return; }
+    setEdTur(null); cargar();
+  };
+  const borrarTur=async(t)=>{
+    if(!window.confirm("¿Borrar el turno "+hhmm(t.hora_inicio)+"–"+hhmm(t.hora_fin)+"?")) return;
+    setBusy(true);
+    const res=await db.from("turnos").delete().eq("id",t.id);
+    setBusy(false);
+    if(res.error){ setErr("No se pudo borrar. "+(res.error.message||"")); return; }
+    setEdTur(null); cargar();
+  };
+
+  if(espacios===null || turnos===null) return <div className="center"><div className="spinner"/></div>;
+
+  return (
+    <div>
+      <div className="backrow">
+        <button className="backbtn" onClick={onBack}>‹</button>
+        <div><div className="h1" style={{fontSize:22}}>Espacios y turnos</div><div className="ppos">{clubNombre||"Mi club"}</div></div>
+      </div>
+      <div className="content">
+        <div className="cfg-t">CANCHAS</div>
+        {espacios.map(e=>(
+          <button className="row" key={e.id} onClick={()=>{setErr(null);setEdEsp({...e});}} style={{width:"100%",textAlign:"left"}}>
+            <span className="sigbadge" style={{minWidth:44}}>{e.alias||e.nombre}</span>
+            <span style={{flex:1,minWidth:0}}>
+              <span className="pname">{e.nombre}{e.es_default?" · default":""}</span>
+              <span className="ppos">{SUBDIV[e.subdivisiones]||e.subdivisiones+" partes"}{e.activo===false?" · inactiva":""}</span>
+            </span>
+            <span className="ppos">✏️</span>
+          </button>
+        ))}
+        <button className="addbtn" onClick={()=>{setErr(null);setEdEsp({nombre:"",alias:"",subdivisiones:2,activo:true,es_default:false});}}>+ Nueva cancha</button>
+
+        <div className="cfg-t" style={{marginTop:22}}>TURNOS</div>
+        {turnos.length===0 && <div className="empty">Todavía no hay turnos. Cargá el primero (arrancás 17:30).</div>}
+        {turnos.map(t=>(
+          <button className="row" key={t.id} onClick={()=>{setErr(null);setEdTur({id:t.id,hora_inicio:hhmm(t.hora_inicio),hora_fin:hhmm(t.hora_fin)});}} style={{width:"100%",textAlign:"left"}}>
+            <span className="sigbadge" style={{minWidth:56}}>{hhmm(t.hora_inicio)}</span>
+            <span style={{flex:1,minWidth:0}}><span className="pname">{hhmm(t.hora_inicio)} – {hhmm(t.hora_fin)}</span></span>
+            <span className="ppos">✏️</span>
+          </button>
+        ))}
+        <button className="addbtn" onClick={()=>{setErr(null);setEdTur({hora_inicio:"17:30",hora_fin:"19:00"});}}>+ Nuevo turno</button>
+      </div>
+
+      {edEsp && (
+        <div className="sheet-bg" onClick={()=>setEdEsp(null)}>
+          <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+            <h3>{edEsp.id?"EDITAR CANCHA":"NUEVA CANCHA"}</h3>
+            <div style={{padding:"4px 20px 8px",display:"flex",flexDirection:"column",gap:16}}>
+              <div><div className="field-lbl">Nombre</div><input className="field" value={edEsp.nombre} onChange={ev=>setEdEsp({...edEsp,nombre:ev.target.value})} placeholder="Cancha 1"/></div>
+              <div><div className="field-lbl">Alias / color</div><input className="field" value={edEsp.alias||""} onChange={ev=>setEdEsp({...edEsp,alias:ev.target.value})} placeholder="Azul"/></div>
+              <div>
+                <div className="field-lbl">Se divide en</div>
+                <div className="selectrow">
+                  {[1,2,3,4].map(n=>(
+                    <button key={n} className={"selchip"+(edEsp.subdivisiones===n?" active":"")} onClick={()=>setEdEsp({...edEsp,subdivisiones:n})}>{SUBDIV[n]}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="field-lbl">Estado</div>
+                <div className="seg" style={{maxWidth:"none"}}>
+                  <button className={"segbtn"+(edEsp.activo!==false?" active":"")} onClick={()=>setEdEsp({...edEsp,activo:true})}>Activa</button>
+                  <button className={"segbtn"+(edEsp.activo===false?" active":"")} onClick={()=>setEdEsp({...edEsp,activo:false})}>Inactiva</button>
+                </div>
+              </div>
+              <div>
+                <div className="field-lbl">Cancha por defecto</div>
+                <div className="seg" style={{maxWidth:"none"}}>
+                  <button className={"segbtn"+(edEsp.es_default?" active":"")} onClick={()=>setEdEsp({...edEsp,es_default:true})}>Sí</button>
+                  <button className={"segbtn"+(!edEsp.es_default?" active":"")} onClick={()=>setEdEsp({...edEsp,es_default:false})}>No</button>
+                </div>
+              </div>
+              {err && <div className="msg err">{err}</div>}
+              <button className="authbtn" onClick={guardarEsp} disabled={busy}>{busy?"Guardando…":(edEsp.id?"Guardar":"Crear cancha")}</button>
+              {edEsp.id && <button className="linkbtn" style={{color:"var(--result-lose)"}} onClick={()=>borrarEsp(edEsp)}>Borrar cancha</button>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {edTur && (
+        <div className="sheet-bg" onClick={()=>setEdTur(null)}>
+          <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+            <h3>{edTur.id?"EDITAR TURNO":"NUEVO TURNO"}</h3>
+            <div style={{padding:"4px 20px 8px",display:"flex",flexDirection:"column",gap:16}}>
+              <div style={{display:"flex",gap:12}}>
+                <div style={{flex:1}}><div className="field-lbl">Inicio</div><input className="field" type="time" value={edTur.hora_inicio} onChange={ev=>setEdTur({...edTur,hora_inicio:ev.target.value})}/></div>
+                <div style={{flex:1}}><div className="field-lbl">Fin</div><input className="field" type="time" value={edTur.hora_fin} onChange={ev=>setEdTur({...edTur,hora_fin:ev.target.value})}/></div>
+              </div>
+              {err && <div className="msg err">{err}</div>}
+              <button className="authbtn" onClick={guardarTur} disabled={busy}>{busy?"Guardando…":(edTur.id?"Guardar":"Crear turno")}</button>
+              {edTur.id && <button className="linkbtn" style={{color:"var(--result-lose)"}} onClick={()=>borrarTur(edTur)}>Borrar turno</button>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============ Panel del coordinador (datos reales) ============ */
 function PanelCoordinador({ clubeId, email }){
   const [data,setData]=useState(null);
@@ -758,9 +919,11 @@ function App({ session }){
       {tabActual==="plantilla"     && (equipo ? <Plantilla equipo={equipo} email={email} multi={equipos.length>1} onOpenPicker={()=>setPickerOpen(true)}/> : <Placeholder titulo="Plantilla" email={email}/>)}
       {tabActual==="campeonato"    && <Campeonato email={email}/>}
       {tabActual==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
-      {tabActual==="config"        && (cfgView==="equipos"
-          ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/>
-          : <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")}/>)}
+      {tabActual==="config"        && (
+          cfgView==="equipos"  ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
+          cfgView==="espacios" ? <EspaciosTurnosManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
+          <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")} onOpenEspacios={()=>setCfgView("espacios")}/>
+      )}
 
       <nav className="bottomnav">
         {navOrder.map(id=>{ const n=NAV_ALL[id]; return (
