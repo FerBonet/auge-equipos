@@ -165,6 +165,20 @@
   .selchip{padding:9px 15px;border-radius:20px;font-size:14px;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--line);min-height:42px}
   .selchip.active{background:var(--accent);color:var(--accent-on);border-color:var(--accent)}
 
+  /* ---- Grilla de entrenamientos ---- */
+  .daychips{display:flex;gap:8px;padding:0 18px 12px}
+  .daychip{flex:1;padding:11px 0;border-radius:12px;font-size:14px;font-weight:700;background:var(--surface);color:var(--muted);border:1px solid var(--line);min-height:44px}
+  .daychip.active{background:var(--accent);color:var(--accent-on);border-color:var(--accent)}
+  .turnoblock{background:var(--surface);border-radius:16px;padding:12px;margin-bottom:12px}
+  [data-mode="dark"] .turnoblock{border:1px solid var(--line)}
+  .turno-h{font-size:13px;font-weight:800;color:var(--accent);margin:2px 2px 10px}
+  .cell{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 10px;border-radius:12px;border:1px solid var(--line);margin-bottom:6px;background:var(--bg);min-height:50px}
+  .cell:last-child{margin-bottom:0}
+  .cell-col{flex:0 0 72px;font-size:12px;color:var(--muted);font-weight:700}
+  .cell-teams{flex:1;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .cell-empty{font-size:12px;color:var(--muted)}
+  .teamchip{padding:4px 8px;border-radius:7px;background:var(--num-bg);color:var(--accent);font-size:11px;font-weight:800}
+
   /* ---- Desktop (pantalla grande): misma app, adaptada ---- */
   @media (min-width:900px){
     .wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px 1fr;min-height:100dvh}
@@ -495,7 +509,7 @@ function Placeholder({ titulo, email }){
 }
 
 /* ============ Configuración (paleta + modo + gestión) ============ */
-function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos, onOpenEspacios }){
+function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos, onOpenEspacios, onOpenGrilla }){
   return (
     <div>
       <div className="topbar"><h1 className="h1">Configuración</h1><div className="avatar">{initials(email)}</div></div>
@@ -503,7 +517,8 @@ function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipo
         {esCoord && <>
           <div className="cfg-t">GESTIÓN DEL CLUB</div>
           <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenEquipos}>Equipos del club<span className="chev">›</span></button>
-          <button className="cfg-row" onClick={onOpenEspacios}>Espacios y turnos<span className="chev">›</span></button>
+          <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenEspacios}>Espacios y turnos<span className="chev">›</span></button>
+          <button className="cfg-row" onClick={onOpenGrilla}>Grilla de entrenamientos<span className="chev">›</span></button>
         </>}
 
         <div className="cfg-t">MODO</div>
@@ -799,6 +814,104 @@ function EspaciosTurnosManager({ clubeId, clubNombre, onBack }){
   );
 }
 
+/* ============ Grilla de entrenamientos (plantilla recurrente) ============ */
+const DIAS_LV = [{n:1,l:"Lu"},{n:2,l:"Ma"},{n:3,l:"Mi"},{n:4,l:"Ju"},{n:5,l:"Vi"}];
+function colLabel(e, sub, n){
+  const base = e.alias || e.nombre;
+  return n<=1 ? base : base+" "+String.fromCharCode(64+sub);
+}
+function GrillaPlantilla({ clubeId, clubNombre, onBack }){
+  const [espacios,setEspacios]=useState(null);
+  const [turnos,setTurnos]=useState(null);
+  const [equipos,setEquipos]=useState(null);
+  const [plantilla,setPlantilla]=useState([]);
+  const [dia,setDia]=useState(1);
+  const [picker,setPicker]=useState(null);   // {turno_id, espacio_id, subdivision, label}
+
+  const cargarPlantilla=()=> db.from("grilla_plantilla")
+    .select("id,dia_semana,turno_id,espacio_id,subdivision,equipo_id").eq("clube_id",clubeId)
+    .then(({data})=>setPlantilla(data||[]));
+
+  useEffect(()=>{
+    db.from("espacios").select("id,nombre,alias,subdivisiones,activo,orden").eq("clube_id",clubeId).eq("activo",true).order("orden").then(({data})=>setEspacios(data||[]));
+    db.from("turnos").select("id,hora_inicio,hora_fin,orden").eq("clube_id",clubeId).order("hora_inicio").then(({data})=>setTurnos(data||[]));
+    db.from("clubs").select("id,nombre,categoria,division,tira,rama,sigla").eq("club_real_id",clubeId).order("categoria").then(({data})=>setEquipos(data||[]));
+    cargarPlantilla();
+  },[clubeId]);
+
+  if(espacios===null||turnos===null||equipos===null) return <div className="center"><div className="spinner"/></div>;
+
+  const hhmm=(t)=>(t||"").slice(0,5);
+  const eqById=(id)=> equipos.find(e=>e.id===id);
+  const columnas=[];
+  espacios.forEach(e=>{ const n=e.subdivisiones||1; for(let s=1;s<=n;s++) columnas.push({espacio_id:e.id,subdivision:s,label:colLabel(e,s,n)}); });
+  const enCelda=(turno_id,espacio_id,subdivision)=> plantilla.filter(p=>p.dia_semana===dia&&p.turno_id===turno_id&&p.espacio_id===espacio_id&&p.subdivision===subdivision);
+
+  const toggle=async(turno_id,espacio_id,subdivision,equipo_id)=>{
+    const ex=plantilla.find(p=>p.dia_semana===dia&&p.turno_id===turno_id&&p.espacio_id===espacio_id&&p.subdivision===subdivision&&p.equipo_id===equipo_id);
+    if(ex){
+      setPlantilla(plantilla.filter(p=>p.id!==ex.id));           // optimista
+      await db.from("grilla_plantilla").delete().eq("id",ex.id);
+    }else{
+      const { data }=await db.from("grilla_plantilla").insert({clube_id:clubeId,dia_semana:dia,turno_id,espacio_id,subdivision,equipo_id}).select().single();
+      if(data) setPlantilla(p=>[...p,data]);
+    }
+  };
+
+  if(turnos.length===0 || columnas.length===0) return (
+    <div>
+      <div className="backrow"><button className="backbtn" onClick={onBack}>‹</button><div><div className="h1" style={{fontSize:22}}>Grilla</div><div className="ppos">{clubNombre||"Mi club"}</div></div></div>
+      <div className="content"><div className="empty"><b>Falta configurar</b><br/>{turnos.length===0?"Cargá los turnos":"Activá al menos una cancha"} en “Espacios y turnos” antes de armar la grilla.</div></div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="backrow"><button className="backbtn" onClick={onBack}>‹</button><div><div className="h1" style={{fontSize:22}}>Grilla</div><div className="ppos">{clubNombre||"Mi club"} · plantilla</div></div></div>
+      <div className="daychips">
+        {DIAS_LV.map(d=>(<button key={d.n} className={"daychip"+(d.n===dia?" active":"")} onClick={()=>setDia(d.n)}>{d.l}</button>))}
+      </div>
+      <div className="content">
+        {turnos.map(t=>(
+          <div className="turnoblock" key={t.id}>
+            <div className="turno-h">{hhmm(t.hora_inicio)} – {hhmm(t.hora_fin)}</div>
+            {columnas.map(c=>{
+              const asigns=enCelda(t.id,c.espacio_id,c.subdivision);
+              return (
+                <button className="cell" key={c.espacio_id+"-"+c.subdivision} onClick={()=>setPicker({turno_id:t.id,espacio_id:c.espacio_id,subdivision:c.subdivision,label:c.label,turnoLabel:hhmm(t.hora_inicio)+"–"+hhmm(t.hora_fin)})}>
+                  <span className="cell-col">{c.label}</span>
+                  <span className="cell-teams">
+                    {asigns.length ? asigns.map(a=>{const e=eqById(a.equipo_id);return <span className="teamchip" key={a.id}>{e?siglaEquipo(e):"?"}</span>;}) : <span className="cell-empty">+ asignar</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {picker && (
+        <div className="sheet-bg" onClick={()=>setPicker(null)}>
+          <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+            <h3>{DIAS_LV.find(d=>d.n===dia).l} · {picker.turnoLabel} · {picker.label}</h3>
+            {equipos.length===0 && <div className="empty" style={{margin:"0 20px"}}>No hay equipos cargados. Creá equipos primero.</div>}
+            {equipos.map(e=>{
+              const on=plantilla.some(p=>p.dia_semana===dia&&p.turno_id===picker.turno_id&&p.espacio_id===picker.espacio_id&&p.subdivision===picker.subdivision&&p.equipo_id===e.id);
+              return (
+                <button key={e.id} className={"eq-row"+(on?" sel":"")} onClick={()=>toggle(picker.turno_id,picker.espacio_id,picker.subdivision,e.id)}>
+                  <span className="sigbadge" style={{marginRight:10}}>{siglaEquipo(e)}</span>
+                  <span style={{flex:1}}>{labelEquipo(e)}</span>
+                  {on && <span style={{color:"var(--accent)",fontWeight:800}}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============ Panel del coordinador (datos reales) ============ */
 function PanelCoordinador({ clubeId, email }){
   const [data,setData]=useState(null);
@@ -922,7 +1035,8 @@ function App({ session }){
       {tabActual==="config"        && (
           cfgView==="equipos"  ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
           cfgView==="espacios" ? <EspaciosTurnosManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
-          <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")} onOpenEspacios={()=>setCfgView("espacios")}/>
+          cfgView==="grilla"   ? <GrillaPlantilla clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
+          <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")} onOpenEspacios={()=>setCfgView("espacios")} onOpenGrilla={()=>setCfgView("grilla")}/>
       )}
 
       <nav className="bottomnav">
