@@ -138,6 +138,53 @@
   .barlbl{font-size:11px;color:var(--muted)}
   .trainrow{display:flex;align-items:center;gap:12px;background:var(--surface);border-radius:14px;padding:14px;margin-bottom:8px;border-left:3px solid var(--accent)}
   [data-mode="dark"] .trainrow{border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+  /* ---- Auth form / onboarding ---- */
+  .authform{width:100%;max-width:320px;display:flex;flex-direction:column;gap:12px}
+  .field{width:100%;min-height:50px;border-radius:14px;background:var(--surface);border:1px solid var(--line);padding:0 16px;font-size:16px;color:var(--text);font-family:inherit}
+  .field::placeholder{color:var(--muted)}
+  .authbtn{width:100%;min-height:52px;border-radius:14px;background:var(--accent);color:var(--accent-on);font-size:16px;font-weight:700}
+  .authbtn:disabled{opacity:.55}
+  .linkbtn{background:none;color:var(--accent);font-size:13px;font-weight:600;padding:6px}
+  .seg{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px;gap:4px;width:100%;max-width:320px}
+  .segbtn{flex:1;padding:9px;border-radius:10px;font-size:14px;font-weight:600;color:var(--muted);min-height:40px}
+  .segbtn.active{background:var(--accent);color:var(--accent-on)}
+  .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;width:100%;max-width:320px}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+  .msg{font-size:13px;max-width:320px;text-align:center;line-height:1.4}
+  .msg.err{color:var(--result-lose)}
+  .msg.ok{color:var(--accent)}
+
+  /* ---- Gestión de equipos ---- */
+  .cfg-row{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px;font-size:15px;color:var(--text);width:100%;text-align:left;min-height:52px}
+  .cfg-row .chev{color:var(--muted);font-size:20px}
+  .sigbadge{flex:0 0 auto;padding:6px 9px;border-radius:8px;background:var(--num-bg);color:var(--accent);font-weight:800;font-size:12px;min-width:34px;text-align:center}
+  .backrow{display:flex;align-items:center;gap:12px;padding:16px 18px;padding-top:calc(16px + env(safe-area-inset-top))}
+  .backbtn{width:42px;height:42px;flex:0 0 auto;border-radius:12px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--text);font-size:24px}
+  .field-lbl{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .selectrow{display:flex;gap:8px;flex-wrap:wrap}
+  .selchip{padding:9px 15px;border-radius:20px;font-size:14px;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--line);min-height:42px}
+  .selchip.active{background:var(--accent);color:var(--accent-on);border-color:var(--accent)}
+
+  /* ---- Desktop (pantalla grande): misma app, adaptada ---- */
+  @media (min-width:900px){
+    .wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px 1fr;min-height:100dvh}
+    .bottomnav{position:sticky;top:0;left:auto;transform:none;width:240px;max-width:none;height:100dvh;
+      flex-direction:column;justify-content:flex-start;gap:6px;border-top:none;border-right:1px solid var(--line);
+      padding:26px 14px;grid-column:1;grid-row:1}
+    .navitem{flex:0 0 auto;flex-direction:row;justify-content:flex-start;gap:13px;width:100%;
+      padding:12px 14px;border-radius:12px;font-size:14.5px;min-height:48px}
+    .navitem .navico{width:26px;height:26px;border-radius:8px}
+    .navitem.active{background:var(--num-bg);color:var(--accent)}
+    .navitem.active .navico{background:transparent;color:var(--accent)}
+    .wrap > div:not(.bottomnav):not(.sheet-bg){grid-column:2;grid-row:1;min-width:0}
+    .content{padding:0 32px 44px;max-width:920px}
+    .topbar,.screen-sub,.pill,.chips{padding-left:32px;padding-right:32px}
+    .chips{max-width:920px}
+    .metrics{grid-template-columns:repeat(4,1fr)}
+    .h1{font-size:30px}
+    .sheet-bg{align-items:center}
+    .sheet{max-width:420px;border-radius:20px}
+  }
 </style>
 </head>
 <body>
@@ -207,22 +254,134 @@ function fmtFecha(iso){
   const d = new Date(iso+"T12:00:00");
   return DIAS[d.getDay()]+" "+d.getDate()+" "+MESES[d.getMonth()];
 }
+const DIVISIONES = ["10ma","9na","8va","7ma","6ta","5ta","PS"];
+const ramaAbbr = (r)=> r==="Damas"?"Dam":r==="Caballeros"?"Cab":"";
+const divNum   = (d)=> d==="PS"?"PS":(d||"").replace(/[^0-9]/g,"");
+function genSigla(division,tira,rama){
+  if(!division) return "";
+  return (divNum(division)+(tira||"")+(ramaAbbr(rama)?" "+ramaAbbr(rama):"")).trim();
+}
+function tiraOpts(rama,division){
+  if(rama==="Caballeros") return division==="PS" ? ["A","B","C"] : ["A","B"];
+  return ["A","B","C","D"]; // Damas o sin definir
+}
+const labelEquipo  = (e)=> e.division ? (e.division+(e.tira?" "+e.tira:"")).trim() : (e.categoria||e.nombre||"Equipo");
+const siglaEquipo  = (e)=> e.sigla || genSigla(e.division,e.tira,e.rama) || (e.categoria||e.nombre||"").slice(0,5);
 
 /* ============ Login ============ */
 function Login(){
-  const [loading,setLoading]=useState(false);
-  const entrar=async()=>{ setLoading(true); await db.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.href.split("#")[0] } }); };
+  const [mode,setMode]=useState("in");   // in | up
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);      // {type:'err'|'ok', text}
+
+  const traducir=(m)=>{
+    const s=(m||"").toLowerCase();
+    if(s.includes("invalid login")) return "Email o contraseña incorrectos.";
+    if(s.includes("already registered")) return "Ese email ya tiene una cuenta. Probá ingresar.";
+    if(s.includes("at least")) return "La contraseña debe tener al menos 6 caracteres.";
+    if(s.includes("valid email")||s.includes("invalid email")) return "El email no parece válido.";
+    if(s.includes("weak")) return "Esa contraseña es muy débil.";
+    return m || "Ocurrió un error. Probá de nuevo.";
+  };
+
+  const google=async()=>{ setBusy(true); await db.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.href.split("#")[0] } }); };
+
+  const submit=async()=>{
+    setMsg(null);
+    if(!email || !pass){ setMsg({type:"err",text:"Completá email y contraseña."}); return; }
+    setBusy(true);
+    try{
+      if(mode==="in"){
+        const { error }=await db.auth.signInWithPassword({ email, password:pass });
+        if(error) setMsg({type:"err",text:traducir(error.message)});
+      }else{
+        const { data, error }=await db.auth.signUp({ email, password:pass });
+        if(error) setMsg({type:"err",text:traducir(error.message)});
+        else if(!data.session) setMsg({type:"ok",text:"Cuenta creada. Revisá tu correo para confirmarla."});
+      }
+    } finally { setBusy(false); }
+  };
+
+  const olvide=async()=>{
+    if(!email){ setMsg({type:"err",text:"Escribí tu email arriba y volvé a tocar."}); return; }
+    setBusy(true);
+    const { error }=await db.auth.resetPasswordForEmail(email,{ redirectTo: window.location.href.split("#")[0] });
+    setBusy(false);
+    setMsg(error?{type:"err",text:traducir(error.message)}:{type:"ok",text:"Te mandamos un mail para recuperar la contraseña."});
+  };
+
   return (
     <div className="center">
       <div className="logo">A</div>
       <div><h1 className="title-xl">Auge Equipos</h1><p className="sub">Ingresá para ver tus equipos.</p></div>
-      <button className="btn-google" onClick={entrar} disabled={loading}>
+
+      <button className="btn-google" onClick={google} disabled={busy}>
         <svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.8-6.8C35.6 2.4 30.1 0 24 0 14.6 0 6.4 5.4 2.6 13.2l7.9 6.1C12.4 13.3 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.6 6.9l7.1 5.5c4.1-3.8 6.5-9.4 6.5-16.9z"/><path fill="#FBBC05" d="M10.5 28.3a14.5 14.5 0 010-9.2l-7.9-6.1a24 24 0 000 21.4l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.1 0 11.3-2 15-5.5l-7.1-5.5c-2 1.3-4.6 2.1-7.9 2.1-6.3 0-11.6-3.8-13.5-9.3l-7.9 6.1C6.4 42.6 14.6 48 24 48z"/></svg>
-        {loading ? "Redirigiendo…" : "Ingresar con Google"}
+        Ingresar con Google
       </button>
+
+      <div className="divider">o con tu email</div>
+
+      <div className="seg">
+        <button className={"segbtn"+(mode==="in"?" active":"")} onClick={()=>{setMode("in");setMsg(null);}}>Ingresar</button>
+        <button className={"segbtn"+(mode==="up"?" active":"")} onClick={()=>{setMode("up");setMsg(null);}}>Crear cuenta</button>
+      </div>
+
+      <div className="authform">
+        <input className="field" type="email" inputMode="email" autoComplete="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}/>
+        <input className="field" type="password" autoComplete={mode==="in"?"current-password":"new-password"} placeholder="Contraseña" value={pass} onChange={e=>setPass(e.target.value)}/>
+        <button className="authbtn" onClick={submit} disabled={busy}>{busy?"…":(mode==="in"?"Ingresar":"Crear cuenta")}</button>
+        {mode==="in" && <button className="linkbtn" onClick={olvide} disabled={busy}>¿Olvidaste tu contraseña?</button>}
+      </div>
+
+      {msg && <div className={"msg "+(msg.type==="err"?"err":"ok")}>{msg.text}</div>}
     </div>
   );
 }
+
+/* ============ Onboarding: validá tu carnet ============ */
+function Onboarding({ email, onValidated }){
+  const [carnet,setCarnet]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+
+  const validar=async()=>{
+    setMsg(null);
+    if(!carnet.trim()){ setMsg({type:"err",text:"Ingresá tu número de carnet."}); return; }
+    setBusy(true);
+    const { data, error }=await db.rpc("validar_carnet",{ p_carnet:carnet.trim() });
+    setBusy(false);
+    if(error){ setMsg({type:"err",text:"No se pudo validar. Probá de nuevo."}); return; }
+    const st=data && data.status;
+    if(st==="ok"){
+      const eqs=(data.equipos||[]).map(e=>e.nombre).join(", ");
+      setMsg({type:"ok",text:"¡Listo! Te asociamos"+(eqs?" a: "+eqs:"")+"."});
+      setTimeout(onValidated, 900);
+    } else if(st==="no_encontrado"){
+      setMsg({type:"err",text:"No encontramos ese carnet. Revisá el número o pedile a tu entrenador que te cargue."});
+    } else if(st==="ya_asociado"){
+      setMsg({type:"err",text:"Ese carnet ya está asociado a otra cuenta. Hablá con tu coordinador."});
+    } else {
+      setMsg({type:"err",text:"No se pudo validar. Probá de nuevo."});
+    }
+  };
+
+  return (
+    <div className="center">
+      <div className="logo">A</div>
+      <div><h1 className="title-xl">Validá tu carnet</h1><p className="sub">Ingresá tu número de carnet AAHBA para vincularte con tu ficha y ver tus equipos.</p></div>
+      <div className="authform">
+        <input className="field" inputMode="numeric" placeholder="Número de carnet" value={carnet} onChange={e=>setCarnet(e.target.value)}/>
+        <button className="authbtn" onClick={validar} disabled={busy}>{busy?"Validando…":"Validar"}</button>
+      </div>
+      {msg && <div className={"msg "+(msg.type==="err"?"err":"ok")}>{msg.text}</div>}
+      <button className="linkbtn" onClick={()=>db.auth.signOut()}>Cerrar sesión</button>
+    </div>
+  );
+}
+
 
 /* ============ Plantilla (datos reales) ============ */
 function Plantilla({ equipo, email, multi, onOpenPicker }){
@@ -334,12 +493,17 @@ function Placeholder({ titulo, email }){
   );
 }
 
-/* ============ Configuración (paleta + modo) ============ */
-function Config({ email, palette, mode, onPalette, onMode }){
+/* ============ Configuración (paleta + modo + gestión) ============ */
+function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos }){
   return (
     <div>
       <div className="topbar"><h1 className="h1">Configuración</h1><div className="avatar">{initials(email)}</div></div>
       <div className="content">
+        {esCoord && <>
+          <div className="cfg-t">GESTIÓN DEL CLUB</div>
+          <button className="cfg-row" onClick={onOpenEquipos}>Equipos del club<span className="chev">›</span></button>
+        </>}
+
         <div className="cfg-t">MODO</div>
         <div className="modetoggle">
           <button className={"modebtn"+(mode==="light"?" active":"")} onClick={()=>onMode("light")}>Claro</button>
@@ -364,6 +528,112 @@ function Config({ email, palette, mode, onPalette, onMode }){
         <div className="cfg-mail">Sesión iniciada como <b>{email}</b></div>
         <button className="logout" onClick={()=>db.auth.signOut()}>Cerrar sesión</button>
       </div>
+    </div>
+  );
+}
+
+/* ============ Gestión de equipos del club ============ */
+function EquiposManager({ clubeId, clubNombre, onBack }){
+  const [lista,setLista]=useState(null);
+  const [editing,setEditing]=useState(null);   // null | {id?,rama,division,tira,sigla,_legacy?}
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState(null);
+
+  const cargar=()=>{
+    setLista(null);
+    db.from("clubs").select("id,nombre,categoria,division,tira,rama,sigla")
+      .eq("club_real_id", clubeId)
+      .then(({data,error})=>{ setLista(error?[]:(data||[])); });
+  };
+  useEffect(cargar,[clubeId]);
+
+  const nuevo =()=>{ setErr(null); setEditing({rama:"Caballeros",division:"",tira:"",sigla:""}); };
+  const editar=(e)=>{ setErr(null); setEditing({id:e.id,rama:e.rama||"Caballeros",division:e.division||"",tira:e.tira||"",sigla:e.sigla||"",_legacy:(!e.division?(e.categoria||e.nombre):null)}); };
+
+  const guardar=async()=>{
+    const f=editing;
+    if(!f.division||!f.tira||!f.rama){ setErr("Completá rama, división y tira."); return; }
+    const auto=genSigla(f.division,f.tira,f.rama);
+    const siglaStore=(f.sigla && f.sigla.trim() && f.sigla.trim()!==auto) ? f.sigla.trim() : null;
+    setSaving(true); setErr(null);
+    let res;
+    if(f.id){
+      res=await db.from("clubs").update({division:f.division,tira:f.tira,rama:f.rama,sigla:siglaStore}).eq("id",f.id);
+    }else{
+      res=await db.from("clubs").insert({club_real_id:clubeId, nombre:(f.division+" "+f.tira).trim(), categoria:f.rama, division:f.division, tira:f.tira, rama:f.rama, sigla:siglaStore});
+    }
+    setSaving(false);
+    if(res.error){ setErr("No se pudo guardar. "+(res.error.message||"")); return; }
+    setEditing(null); cargar();
+  };
+
+  if(lista===null) return <div className="center"><div className="spinner"/></div>;
+
+  return (
+    <div>
+      <div className="backrow">
+        <button className="backbtn" onClick={onBack}>‹</button>
+        <div><div className="h1" style={{fontSize:22}}>Equipos</div><div className="ppos">{clubNombre||"Mi club"}</div></div>
+      </div>
+      <div className="content">
+        {lista.length===0 && <div className="empty">Todavía no hay equipos. Creá el primero.</div>}
+        {lista.map(e=>(
+          <button className="row" key={e.id} onClick={()=>editar(e)} style={{width:"100%",textAlign:"left"}}>
+            <span className="sigbadge">{siglaEquipo(e)}</span>
+            <span style={{flex:1,minWidth:0}}>
+              <span className="pname">{labelEquipo(e)}</span>
+              <span className="ppos">{(e.rama||e.categoria||"—")}{!e.division ? " · a normalizar" : ""}</span>
+            </span>
+            <span className="ppos">✏️</span>
+          </button>
+        ))}
+        <button className="addbtn" onClick={nuevo}>+ Nuevo equipo</button>
+      </div>
+
+      {editing && (
+        <div className="sheet-bg" onClick={()=>setEditing(null)}>
+          <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+            <h3>{editing.id?"EDITAR EQUIPO":"NUEVO EQUIPO"}</h3>
+            <div style={{padding:"4px 20px 8px",display:"flex",flexDirection:"column",gap:16}}>
+              {editing._legacy && <div className="ppos">Nombre actual: {editing._legacy}</div>}
+              <div>
+                <div className="field-lbl">Rama</div>
+                <div className="seg" style={{maxWidth:"none"}}>
+                  {["Damas","Caballeros"].map(r=>(
+                    <button key={r} className={"segbtn"+(editing.rama===r?" active":"")}
+                      onClick={()=>setEditing({...editing,rama:r,tira:tiraOpts(r,editing.division).includes(editing.tira)?editing.tira:""})}>{r}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="field-lbl">División</div>
+                <div className="selectrow">
+                  {DIVISIONES.map(d=>(
+                    <button key={d} className={"selchip"+(editing.division===d?" active":"")}
+                      onClick={()=>setEditing({...editing,division:d,tira:tiraOpts(editing.rama,d).includes(editing.tira)?editing.tira:""})}>{d}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="field-lbl">Tira</div>
+                <div className="selectrow">
+                  {tiraOpts(editing.rama,editing.division).map(t=>(
+                    <button key={t} className={"selchip"+(editing.tira===t?" active":"")}
+                      onClick={()=>setEditing({...editing,tira:t})}>{t}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="field-lbl">Sigla (se genera sola; podés editarla)</div>
+                <input className="field" value={editing.sigla || genSigla(editing.division,editing.tira,editing.rama)}
+                  onChange={ev=>setEditing({...editing,sigla:ev.target.value})} placeholder="Sigla"/>
+              </div>
+              {err && <div className="msg err">{err}</div>}
+              <button className="authbtn" onClick={guardar} disabled={saving}>{saving?"Guardando…":(editing.id?"Guardar cambios":"Crear equipo")}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -448,17 +718,19 @@ function App({ session }){
   const [pickerOpen,setPickerOpen]=useState(false);
   const [palette,setPalette]=useState(()=>localStorage.getItem("mobile_palette")||"celeste");
   const [mode,setMode]=useState(()=>localStorage.getItem("mobile_mode")||"dark");
+  const [cfgView,setCfgView]=useState("main");   // main | equipos
 
   useEffect(()=>{ applyTheme(palette,mode); localStorage.setItem("mobile_palette",palette); localStorage.setItem("mobile_mode",mode); },[palette,mode]);
   useEffect(()=>{ if(equipoSel) localStorage.setItem("mobile_equipo",equipoSel); },[equipoSel]);
   useEffect(()=>{ if(tab) localStorage.setItem("mobile_tab",tab); },[tab]);
 
-  useEffect(()=>{
+  const loadAccesos=React.useCallback(()=>{
+    setAccesos(null);
     db.rpc("mis_accesos").then(({data,error})=>{
-      if(error){ console.error(error); setAccesos({equipos:[],clubes:[],super_admin:false}); return; }
-      setAccesos(data||{equipos:[],clubes:[]});
+      setAccesos(error ? {equipos:[],clubes:[],super_admin:false} : (data||{equipos:[],clubes:[]}));
     });
   },[]);
+  useEffect(()=>{ loadAccesos(); },[loadAccesos]);
 
   useEffect(()=>{
     if(!accesos) return;
@@ -471,17 +743,12 @@ function App({ session }){
   const equipos = accesos.equipos || [];
   const esCoord = !!accesos.super_admin || (accesos.clubes||[]).length>0;
   const clubeId = (accesos.clubes||[])[0]?.id || equipos[0]?.clube_id || null;
+  const clubNombre = (accesos.clubes||[])[0]?.nombre || null;
   const navOrder = esCoord ? ["panel","plantilla","campeonato","config"]
                            : ["plantilla","campeonato","entrenamiento","config"];
   const tabActual = navOrder.includes(tab) ? tab : navOrder[0];
 
-  if(!esCoord && equipos.length===0) return (
-    <div className="center">
-      <div className="logo" style={{background:"var(--surface)"}}>A</div>
-      <div><h1 className="title-xl">Sin equipos todavía</h1><p className="sub">Tu cuenta ({email}) aún no tiene equipos asignados.</p></div>
-      <button className="logout" style={{maxWidth:220}} onClick={()=>db.auth.signOut()}>Cerrar sesión</button>
-    </div>
-  );
+  if(!esCoord && equipos.length===0) return <Onboarding email={email} onValidated={loadAccesos}/>;
 
   const equipo = equipos.find(e=>e.id===equipoSel) || equipos[0] || null;
 
@@ -491,7 +758,9 @@ function App({ session }){
       {tabActual==="plantilla"     && (equipo ? <Plantilla equipo={equipo} email={email} multi={equipos.length>1} onOpenPicker={()=>setPickerOpen(true)}/> : <Placeholder titulo="Plantilla" email={email}/>)}
       {tabActual==="campeonato"    && <Campeonato email={email}/>}
       {tabActual==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
-      {tabActual==="config"        && <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode}/>}
+      {tabActual==="config"        && (cfgView==="equipos"
+          ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/>
+          : <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")}/>)}
 
       <nav className="bottomnav">
         {navOrder.map(id=>{ const n=NAV_ALL[id]; return (
