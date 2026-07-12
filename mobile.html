@@ -179,6 +179,12 @@
   .cell-empty{font-size:12px;color:var(--muted)}
   .teamchip{padding:4px 8px;border-radius:7px;background:var(--num-bg);color:var(--accent);font-size:11px;font-weight:800}
 
+  /* ---- Cuerpo técnico ---- */
+  .staff-line{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:6px}
+  .staff-line .nm{flex:1;font-size:14px}
+  .staff-line .mt{font-size:12px;color:var(--muted)}
+  .staff-x{color:var(--result-lose);font-weight:800;font-size:18px;padding:2px 8px}
+
   /* ---- Desktop (pantalla grande): misma app, adaptada ---- */
   @media (min-width:900px){
     .wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px 1fr;min-height:100dvh}
@@ -509,7 +515,7 @@ function Placeholder({ titulo, email }){
 }
 
 /* ============ Configuración (paleta + modo + gestión) ============ */
-function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos, onOpenEspacios, onOpenGrilla }){
+function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipos, onOpenEspacios, onOpenGrilla, onOpenStaff }){
   return (
     <div>
       <div className="topbar"><h1 className="h1">Configuración</h1><div className="avatar">{initials(email)}</div></div>
@@ -518,7 +524,8 @@ function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipo
           <div className="cfg-t">GESTIÓN DEL CLUB</div>
           <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenEquipos}>Equipos del club<span className="chev">›</span></button>
           <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenEspacios}>Espacios y turnos<span className="chev">›</span></button>
-          <button className="cfg-row" onClick={onOpenGrilla}>Grilla de entrenamientos<span className="chev">›</span></button>
+          <button className="cfg-row" style={{marginBottom:10}} onClick={onOpenGrilla}>Grilla de entrenamientos<span className="chev">›</span></button>
+          <button className="cfg-row" onClick={onOpenStaff}>Cuerpo técnico<span className="chev">›</span></button>
         </>}
 
         <div className="cfg-t">MODO</div>
@@ -550,7 +557,7 @@ function Config({ email, palette, mode, onPalette, onMode, esCoord, onOpenEquipo
 }
 
 /* ============ Gestión de equipos del club ============ */
-function EquiposManager({ clubeId, clubNombre, onBack }){
+function EquiposManager({ clubeId, clubNombre, email, onBack }){
   const [lista,setLista]=useState(null);
   const [editing,setEditing]=useState(null);   // null | {id?,rama,division,tira,sigla,_legacy?}
   const [saving,setSaving]=useState(false);
@@ -577,7 +584,7 @@ function EquiposManager({ clubeId, clubNombre, onBack }){
     if(f.id){
       res=await db.from("clubs").update({division:f.division,tira:f.tira,rama:f.rama,sigla:siglaStore}).eq("id",f.id);
     }else{
-      res=await db.from("clubs").insert({club_real_id:clubeId, nombre:(f.division+" "+f.tira).trim(), categoria:f.rama, division:f.division, tira:f.tira, rama:f.rama, sigla:siglaStore});
+      res=await db.from("clubs").insert({club_real_id:clubeId, owner_email:email, nombre:(f.division+" "+f.tira).trim(), categoria:f.rama, division:f.division, tira:f.tira, rama:f.rama, sigla:siglaStore});
     }
     setSaving(false);
     if(res.error){ setErr("No se pudo guardar. "+(res.error.message||"")); return; }
@@ -912,6 +919,132 @@ function GrillaPlantilla({ clubeId, clubNombre, onBack }){
   );
 }
 
+/* ============ Cuerpo técnico (por equipo) ============ */
+const ROL_LBL = { entrenador:"Entrenador", ayudante:"Ayudante", pf:"Preparador físico" };
+function CuerpoTecnicoManager({ clubeId, clubNombre, onBack }){
+  const [equipos,setEquipos]=useState(null);
+  const [staff,setStaff]=useState([]);
+  const [asigns,setAsigns]=useState([]);
+  const [sel,setSel]=useState(null);            // equipo seleccionado
+  const [picker,setPicker]=useState(null);      // {rol}
+  const [nueva,setNueva]=useState(null);        // form nueva persona {nombre,email,telefono,_rol}
+  const [err,setErr]=useState(null);
+
+  const cargar=()=>{
+    db.from("clubs").select("id,nombre,categoria,division,tira,rama,sigla").eq("club_real_id",clubeId).order("categoria").then(({data})=>setEquipos(data||[]));
+    db.from("cuerpo_tecnico").select("id,nombre,email,telefono,activo").eq("clube_id",clubeId).eq("activo",true).order("nombre").then(({data})=>setStaff(data||[]));
+    db.from("equipo_staff").select("id,staff_id,equipo_id,rol").eq("clube_id",clubeId).then(({data})=>setAsigns(data||[]));
+  };
+  useEffect(cargar,[clubeId]);
+
+  if(equipos===null) return <div className="center"><div className="spinner"/></div>;
+
+  const staffById=(id)=>staff.find(s=>s.id===id);
+  const asignsDe=(equipoId,rol)=>asigns.filter(a=>a.equipo_id===equipoId&&a.rol===rol);
+  const nombresDe=(equipoId,rol)=>asignsDe(equipoId,rol).map(a=>{const s=staffById(a.staff_id);return s?s.nombre:"?";}).join(", ")||"—";
+
+  const asignar=async(staff_id,rol)=>{
+    if((rol==="entrenador"||rol==="ayudante") && asignsDe(sel.id,rol).length>0){
+      if(!window.confirm("Ya hay un "+ROL_LBL[rol].toLowerCase()+" en "+labelEquipo(sel)+". ¿Agregar otro igual?")) return;
+    }
+    const { data, error }=await db.from("equipo_staff").insert({clube_id:clubeId,staff_id,equipo_id:sel.id,rol}).select().single();
+    if(!error && data) setAsigns(a=>[...a,data]);
+    setPicker(null);
+  };
+  const quitar=async(id)=>{ setAsigns(a=>a.filter(x=>x.id!==id)); await db.from("equipo_staff").delete().eq("id",id); };
+
+  const crearYAsignar=async()=>{
+    const f=nueva;
+    if(!f.nombre||!f.nombre.trim()){ setErr("Poné el nombre."); return; }
+    setErr(null);
+    const { data, error }=await db.from("cuerpo_tecnico").insert({clube_id:clubeId,nombre:f.nombre.trim(),email:(f.email||"").trim()||null,telefono:(f.telefono||"").trim()||null}).select().single();
+    if(error||!data){ setErr("No se pudo crear. "+(error?.message||"")); return; }
+    setStaff(s=>[...s,data]);
+    // asignar directo al rol pendiente
+    const { data:as }=await db.from("equipo_staff").insert({clube_id:clubeId,staff_id:data.id,equipo_id:sel.id,rol:f._rol}).select().single();
+    if(as) setAsigns(a=>[...a,as]);
+    setNueva(null); setPicker(null);
+  };
+
+  // ---- Detalle de un equipo ----
+  if(sel){
+    const seccion=(rol)=>{
+      const items=asignsDe(sel.id,rol);
+      return (
+        <div key={rol}>
+          <div className="cfg-t">{ROL_LBL[rol].toUpperCase()}</div>
+          {items.map(a=>{const s=staffById(a.staff_id);return (
+            <div className="staff-line" key={a.id}>
+              <span className="nm">{s?s.nombre:"?"}{s&&s.telefono?<span className="mt"> · {s.telefono}</span>:null}</span>
+              <button className="staff-x" onClick={()=>quitar(a.id)}>×</button>
+            </div>
+          );})}
+          <button className="addbtn" onClick={()=>{setErr(null);setPicker({rol});}}>+ Asignar {ROL_LBL[rol].toLowerCase()}</button>
+        </div>
+      );
+    };
+    return (
+      <div>
+        <div className="backrow"><button className="backbtn" onClick={()=>setSel(null)}>‹</button><div><div className="h1" style={{fontSize:22}}>{labelEquipo(sel)}</div><div className="ppos">{sel.rama||sel.categoria||""} · cuerpo técnico</div></div></div>
+        <div className="content">
+          {seccion("entrenador")}
+          {seccion("ayudante")}
+          {seccion("pf")}
+        </div>
+
+        {picker && (
+          <div className="sheet-bg" onClick={()=>setPicker(null)}>
+            <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+              <h3>ASIGNAR {ROL_LBL[picker.rol].toUpperCase()} · {labelEquipo(sel)}</h3>
+              {staff.filter(s=>!asignsDe(sel.id,picker.rol).some(a=>a.staff_id===s.id)).map(s=>(
+                <button key={s.id} className="eq-row" onClick={()=>asignar(s.id,picker.rol)}>
+                  <span style={{flex:1}}>{s.nombre}{s.telefono?<span className="ppos"> · {s.telefono}</span>:null}</span>
+                </button>
+              ))}
+              <button className="eq-row" style={{color:"var(--accent)",fontWeight:700}} onClick={()=>{setNueva({nombre:"",email:"",telefono:"",_rol:picker.rol});}}>+ Nueva persona</button>
+            </div>
+          </div>
+        )}
+
+        {nueva && (
+          <div className="sheet-bg" onClick={()=>setNueva(null)}>
+            <div className="sheet" onClick={ev=>ev.stopPropagation()}>
+              <h3>NUEVA PERSONA · {ROL_LBL[nueva._rol]}</h3>
+              <div style={{padding:"4px 20px 8px",display:"flex",flexDirection:"column",gap:14}}>
+                <div><div className="field-lbl">Nombre</div><input className="field" value={nueva.nombre} onChange={e=>setNueva({...nueva,nombre:e.target.value})} placeholder="Nombre y apellido"/></div>
+                <div><div className="field-lbl">Email (opcional)</div><input className="field" type="email" value={nueva.email} onChange={e=>setNueva({...nueva,email:e.target.value})} placeholder="para vincular su cuenta"/></div>
+                <div><div className="field-lbl">Teléfono (opcional)</div><input className="field" value={nueva.telefono} onChange={e=>setNueva({...nueva,telefono:e.target.value})} placeholder="Teléfono"/></div>
+                {err && <div className="msg err">{err}</div>}
+                <button className="authbtn" onClick={crearYAsignar}>Crear y asignar</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---- Lista de equipos ----
+  return (
+    <div>
+      <div className="backrow"><button className="backbtn" onClick={onBack}>‹</button><div><div className="h1" style={{fontSize:22}}>Cuerpo técnico</div><div className="ppos">{clubNombre||"Mi club"}</div></div></div>
+      <div className="content">
+        {equipos.length===0 && <div className="empty">No hay equipos. Creá equipos primero.</div>}
+        {equipos.map(e=>(
+          <button className="row" key={e.id} onClick={()=>setSel(e)} style={{width:"100%",textAlign:"left"}}>
+            <span className="sigbadge">{siglaEquipo(e)}</span>
+            <span style={{flex:1,minWidth:0}}>
+              <span className="pname">{labelEquipo(e)}</span>
+              <span className="ppos">DT: {nombresDe(e.id,"entrenador")} · Ay: {nombresDe(e.id,"ayudante")}</span>
+            </span>
+            <span className="ppos">›</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ============ Panel del coordinador (datos reales) ============ */
 function PanelCoordinador({ clubeId, email }){
   const [data,setData]=useState(null);
@@ -1033,10 +1166,11 @@ function App({ session }){
       {tabActual==="campeonato"    && <Campeonato email={email}/>}
       {tabActual==="entrenamiento" && <Placeholder titulo="Entrenamiento" email={email}/>}
       {tabActual==="config"        && (
-          cfgView==="equipos"  ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
+          cfgView==="equipos"  ? <EquiposManager clubeId={clubeId} clubNombre={clubNombre} email={email} onBack={()=>setCfgView("main")}/> :
           cfgView==="espacios" ? <EspaciosTurnosManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
           cfgView==="grilla"   ? <GrillaPlantilla clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
-          <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")} onOpenEspacios={()=>setCfgView("espacios")} onOpenGrilla={()=>setCfgView("grilla")}/>
+          cfgView==="staff"    ? <CuerpoTecnicoManager clubeId={clubeId} clubNombre={clubNombre} onBack={()=>setCfgView("main")}/> :
+          <Config email={email} palette={palette} mode={mode} onPalette={setPalette} onMode={setMode} esCoord={esCoord} onOpenEquipos={()=>setCfgView("equipos")} onOpenEspacios={()=>setCfgView("espacios")} onOpenGrilla={()=>setCfgView("grilla")} onOpenStaff={()=>setCfgView("staff")}/>
       )}
 
       <nav className="bottomnav">
