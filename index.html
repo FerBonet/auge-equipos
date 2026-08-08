@@ -1962,24 +1962,37 @@
           )}
 
           {/* CAMISETA */}
-          {kitLabel && (
-            <div style={{
-              marginTop:8, padding:"12px 14px", borderRadius:6,
-              background:"rgba(255,255,255,0.03)",
-              border:"1px solid rgba(255,255,255,0.05)",
-              display:"flex", alignItems:"center", gap:12
-            }}>
-              <div style={{fontSize:20}}>👕</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:9, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600}}>
-                  CAMISETA
-                </div>
-                <div style={{fontSize:14, fontWeight:700, marginTop:2}}>
-                  {kitLabel}{kitDesc ? ` · ${kitDesc}` : ""}
+          {kitLabel && (() => {
+            const kitActivo = getKitActivo(fecha, club);
+            const isSinDefinir = fecha.kit === "sin_definir";
+            return (
+              <div style={{
+                marginTop:8, padding:"12px 14px", borderRadius:6,
+                background:"rgba(255,255,255,0.03)",
+                border:"1px solid rgba(255,255,255,0.05)",
+                display:"flex", alignItems:"center", gap:12
+              }}>
+                {isSinDefinir || !kitActivo ? (
+                  <div style={{fontSize:20}}>👕</div>
+                ) : (
+                  <svg width={36} height={54} viewBox="0 0 60 90" style={{flexShrink:0}}>
+                    <CamisetaSVG cx={30} cy={22} kit={kitActivo} scale={1.4} accent={kitActivo.color2}/>
+                    <rect x={19} y={44} width={22} height={22} fill={kitActivo.pantalon} stroke="rgba(0,0,0,0.30)" strokeWidth={0.6} rx={2}/>
+                    <rect x={20} y={66} width={8} height={16} fill={kitActivo.medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+                    <rect x={32} y={66} width={8} height={16} fill={kitActivo.medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+                  </svg>
+                )}
+                <div style={{flex:1}}>
+                  <div style={{fontSize:9, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:600}}>
+                    CAMISETA
+                  </div>
+                  <div style={{fontSize:14, fontWeight:700, marginTop:2}}>
+                    {kitLabel}{kitDesc ? ` · ${kitDesc}` : ""}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── CONVOCATORIA ─────────────────────────────────────────────────── */}
           {!isLibre && jugadores.length > 0 && (
@@ -2626,11 +2639,12 @@
     //  - "bandera"    → mitad izquierda color1, mitad derecha color2
     //  - "mangas"     → cuerpo color1, mangas color2
     const KIT_TIPOS = [
-      { value: "liso",     label: "Liso" },
-      { value: "rayas_v",  label: "Rayas verticales" },
-      { value: "rayas_h",  label: "Rayas horizontales" },
-      { value: "bandera",  label: "Bandera (2 mitades verticales)" },
-      { value: "mangas",   label: "Mangas contrastantes" },
+      { value: "liso",      label: "Liso" },
+      { value: "rayas_v",   label: "Rayas verticales" },
+      { value: "rayas_h",   label: "Rayas horizontales" },
+      { value: "banda_h",   label: "Una banda horizontal en el medio" },
+      { value: "bandera",   label: "Bandera (2 mitades verticales)" },
+      { value: "mangas",    label: "Mangas contrastantes" },
     ];
 
     // Dado un club y la fecha (fecha.kit = "titular" | "suplente" | "sin_definir"),
@@ -2759,6 +2773,24 @@
               </clipPath>
             </defs>
             <g clipPath={`url(#${clipId})`}>{rects}</g>
+            <path d={camisetaPath} fill="none" stroke={stroke} strokeWidth={0.8}/>
+          </>
+        );
+      } else if (tipo === "banda_h") {
+        // Una sola banda horizontal (color2) centrada verticalmente sobre fondo color1
+        const bandaH = h * 0.30; // grosor de la banda (30% del alto)
+        const bandaY = y + h * 0.35; // arranca al ~35% del alto (centrada)
+        contenidoInterno = (
+          <>
+            <defs>
+              <clipPath id={clipId}>
+                <path d={camisetaPath}/>
+              </clipPath>
+            </defs>
+            <g clipPath={`url(#${clipId})`}>
+              <rect x={x} y={y} width={w} height={h} fill={c1}/>
+              <rect x={x} y={bandaY} width={w} height={bandaH} fill={c2}/>
+            </g>
             <path d={camisetaPath} fill="none" stroke={stroke} strokeWidth={0.8}/>
           </>
         );
@@ -3159,6 +3191,7 @@
 
       // Ícono de condición
       const condIcon = isLocal ? "🏠" : isVisitante ? "✈️" : "•";
+      const kitActivo = fecha.kit !== "sin_definir" ? getKitActivo(fecha, club) : null;
 
       // Filas de info que sí tienen valor
       const rows = [];
@@ -3166,7 +3199,12 @@
       if (fecha.kick_time)     rows.push({ icon: "⏱",  label: "PARTIDO",  value: fecha.kick_time });
       if (fecha.location)      rows.push({ icon: "🏟",  label: "CANCHA",   value: fecha.location });
       if (kitLabel && kitLabel !== "SIN DEFINIR") {
-        rows.push({ icon: "👕", label: "CAMISETA", value: kitDesc ? `${kitLabel} · ${kitDesc}` : kitLabel });
+        rows.push({
+          icon: "👕",
+          label: "CAMISETA",
+          value: kitDesc ? `${kitLabel} · ${kitDesc}` : kitLabel,
+          kit: kitActivo,
+        });
       }
 
       return (
@@ -3211,7 +3249,16 @@
             }}>
               {rows.map((r, i) => (
                 <div key={i} style={{display:"flex", alignItems:"center", gap:6, minWidth:0}}>
-                  <span style={{fontSize:13, flexShrink:0}}>{r.icon}</span>
+                  {r.kit ? (
+                    <svg width={22} height={26} viewBox="0 0 60 90" style={{flexShrink:0}}>
+                      <CamisetaSVG cx={30} cy={22} kit={r.kit} scale={1.4} accent={r.kit.color2}/>
+                      <rect x={19} y={44} width={22} height={22} fill={r.kit.pantalon} stroke="rgba(0,0,0,0.30)" strokeWidth={0.6} rx={2}/>
+                      <rect x={20} y={66} width={8} height={16} fill={r.kit.medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+                      <rect x={32} y={66} width={8} height={16} fill={r.kit.medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+                    </svg>
+                  ) : (
+                    <span style={{fontSize:13, flexShrink:0}}>{r.icon}</span>
+                  )}
                   <div style={{minWidth:0, flex:1}}>
                     <div style={{fontSize:8, fontFamily:"var(--mono)", letterSpacing:1.5, color:"var(--white-dim)", fontWeight:700}}>
                       {r.label}
