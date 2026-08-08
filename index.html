@@ -2615,6 +2615,191 @@
       );
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  DISEÑO DE CAMISETA · configurable por club (titular / suplente)
+    //  Devuelve los colores y estilo de la camiseta según el kit elegido en la fecha.
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Tipos de diseño soportados:
+    //  - "liso"       → un solo color (color1)
+    //  - "rayas_v"    → rayas verticales alternando color1 y color2
+    //  - "rayas_h"    → rayas horizontales alternando color1 y color2
+    //  - "bandera"    → mitad izquierda color1, mitad derecha color2
+    //  - "mangas"     → cuerpo color1, mangas color2
+    const KIT_TIPOS = [
+      { value: "liso",     label: "Liso" },
+      { value: "rayas_v",  label: "Rayas verticales" },
+      { value: "rayas_h",  label: "Rayas horizontales" },
+      { value: "bandera",  label: "Bandera (2 mitades verticales)" },
+      { value: "mangas",   label: "Mangas contrastantes" },
+    ];
+
+    // Dado un club y la fecha (fecha.kit = "titular" | "suplente" | "sin_definir"),
+    // devuelve el kit activo con todos sus atributos, o null si no está configurado.
+    function getKitActivo(fecha, club) {
+      const kit = fecha?.kit === "suplente" ? "suplente" : "titular";
+      if (!club) return null;
+      const prefix = kit === "suplente" ? "kit_suplente" : "kit_titular";
+      return {
+        kit,
+        descripcion: club[`${prefix}`] || "",
+        color1: club[`${prefix}_color1`] || club.theme_primary || "#4FC3E8",
+        color2: club[`${prefix}_color2`] || "#FFFFFF",
+        tipo: club[`${prefix}_tipo`] || "liso",
+        pantalon: club[`${prefix}_pantalon`] || "#111111",
+        medias: club[`${prefix}_medias`] || club.theme_primary || "#4FC3E8",
+      };
+    }
+
+    // Renderiza una camiseta SVG con el diseño del kit activo.
+    // Se usa como <CamisetaSVG cx={cx} cy={cy} kit={kit} scale={1} accent={color}/>
+    // El accent es opcional (para el cuello); si no se pasa, usa color2.
+    function CamisetaSVG({ cx, cy, kit, scale = 1, accent, showCollar = true, useShadow = true }) {
+      if (!kit) return null;
+      const w = 32 * scale;
+      const h = 32 * scale;
+      const x = cx - w / 2;
+      const y = cy - h * 0.45;
+      const c1 = kit.color1;
+      const c2 = kit.color2;
+      const tipo = kit.tipo || "liso";
+      const accentColor = accent || c2 || "#000000";
+
+      // Path exterior de la camiseta (mangas + cuerpo)
+      const camisetaPath = `
+        M ${x + w * 0.18} ${y}
+        L ${x} ${y + h * 0.15}
+        L ${x + w * 0.05} ${y + h * 0.42}
+        L ${x + w * 0.22} ${y + h * 0.36}
+        L ${x + w * 0.22} ${y + h * 0.95}
+        Q ${x + w * 0.22} ${y + h * 1.0} ${x + w * 0.28} ${y + h * 1.0}
+        L ${x + w * 0.72} ${y + h * 1.0}
+        Q ${x + w * 0.78} ${y + h * 1.0} ${x + w * 0.78} ${y + h * 0.95}
+        L ${x + w * 0.78} ${y + h * 0.36}
+        L ${x + w * 0.95} ${y + h * 0.42}
+        L ${x + w} ${y + h * 0.15}
+        L ${x + w * 0.82} ${y}
+        L ${x + w * 0.62} ${y}
+        Q ${x + w * 0.5} ${y + h * 0.10} ${x + w * 0.38} ${y}
+        Z
+      `;
+      // Path del cuerpo (sin mangas) — para clipping o para colorear solo el cuerpo
+      const cuerpoPath = `
+        M ${x + w * 0.22} ${y + h * 0.36}
+        L ${x + w * 0.22} ${y + h * 0.95}
+        Q ${x + w * 0.22} ${y + h * 1.0} ${x + w * 0.28} ${y + h * 1.0}
+        L ${x + w * 0.72} ${y + h * 1.0}
+        Q ${x + w * 0.78} ${y + h * 1.0} ${x + w * 0.78} ${y + h * 0.95}
+        L ${x + w * 0.78} ${y + h * 0.36}
+        L ${x + w * 0.62} ${y}
+        Q ${x + w * 0.5} ${y + h * 0.10} ${x + w * 0.38} ${y}
+        Z
+      `;
+      // Path de la manga izquierda
+      const mangaIzq = `
+        M ${x + w * 0.18} ${y}
+        L ${x} ${y + h * 0.15}
+        L ${x + w * 0.05} ${y + h * 0.42}
+        L ${x + w * 0.22} ${y + h * 0.36}
+        L ${x + w * 0.38} ${y}
+        Z
+      `;
+      // Path de la manga derecha
+      const mangaDer = `
+        M ${x + w * 0.82} ${y}
+        L ${x + w} ${y + h * 0.15}
+        L ${x + w * 0.95} ${y + h * 0.42}
+        L ${x + w * 0.78} ${y + h * 0.36}
+        L ${x + w * 0.62} ${y}
+        Z
+      `;
+
+      // Cuello en V
+      const dCollar = `
+        M ${x + w * 0.38} ${y}
+        Q ${x + w * 0.5} ${y + h * 0.13} ${x + w * 0.62} ${y}
+      `;
+
+      const clipId = `clip-jersey-${Math.round(cx * 100)}-${Math.round(cy * 100)}`;
+      const shadow = useShadow ? "rgba(0,0,0,0.25)" : "none";
+      const stroke = "rgba(0,0,0,0.30)";
+
+      // Contenido según tipo
+      let contenidoInterno = null;
+      if (tipo === "rayas_v") {
+        // 5 franjas verticales alternando c1/c2
+        const stripes = 5;
+        const stripeW = w / stripes;
+        const rects = [];
+        for (let i = 0; i < stripes; i++) {
+          rects.push(<rect key={"sv" + i} x={x + i * stripeW} y={y} width={stripeW} height={h} fill={i % 2 === 0 ? c1 : c2}/>);
+        }
+        contenidoInterno = (
+          <>
+            <defs>
+              <clipPath id={clipId}>
+                <path d={camisetaPath}/>
+              </clipPath>
+            </defs>
+            <g clipPath={`url(#${clipId})`}>{rects}</g>
+            <path d={camisetaPath} fill="none" stroke={stroke} strokeWidth={0.8}/>
+          </>
+        );
+      } else if (tipo === "rayas_h") {
+        const stripes = 5;
+        const stripeH = h / stripes;
+        const rects = [];
+        for (let i = 0; i < stripes; i++) {
+          rects.push(<rect key={"sh" + i} x={x} y={y + i * stripeH} width={w} height={stripeH} fill={i % 2 === 0 ? c1 : c2}/>);
+        }
+        contenidoInterno = (
+          <>
+            <defs>
+              <clipPath id={clipId}>
+                <path d={camisetaPath}/>
+              </clipPath>
+            </defs>
+            <g clipPath={`url(#${clipId})`}>{rects}</g>
+            <path d={camisetaPath} fill="none" stroke={stroke} strokeWidth={0.8}/>
+          </>
+        );
+      } else if (tipo === "bandera") {
+        // Mitad izquierda c1, mitad derecha c2
+        contenidoInterno = (
+          <>
+            <defs>
+              <clipPath id={clipId}>
+                <path d={camisetaPath}/>
+              </clipPath>
+            </defs>
+            <g clipPath={`url(#${clipId})`}>
+              <rect x={x} y={y} width={w / 2} height={h} fill={c1}/>
+              <rect x={x + w / 2} y={y} width={w / 2} height={h} fill={c2}/>
+            </g>
+            <path d={camisetaPath} fill="none" stroke={stroke} strokeWidth={0.8}/>
+          </>
+        );
+      } else if (tipo === "mangas") {
+        // Cuerpo c1, mangas c2
+        contenidoInterno = (
+          <>
+            <path d={mangaIzq} fill={c2} stroke={stroke} strokeWidth={0.8}/>
+            <path d={mangaDer} fill={c2} stroke={stroke} strokeWidth={0.8}/>
+            <path d={cuerpoPath} fill={c1} stroke={stroke} strokeWidth={0.8}/>
+          </>
+        );
+      } else {
+        // liso
+        contenidoInterno = <path d={camisetaPath} fill={c1} stroke={stroke} strokeWidth={0.8}/>;
+      }
+
+      return (
+        <g style={useShadow ? {filter: `drop-shadow(0 1px 1px ${shadow})`} : undefined}>
+          {contenidoInterno}
+          {showCollar && <path d={dCollar} fill="none" stroke={accentColor} strokeWidth={1.2}/>}
+        </g>
+      );
+    }
+
     // Helper: extrae el apellido (primera parte hasta la coma o primer espacio)
     function apellidoCorto(nombre) {
       if (!nombre) return "";
@@ -5747,12 +5932,32 @@
             </Section>
 
             <Section title="👕 CAMISETAS">
-              <Field label="Camiseta titular" hint='Ej: "Blanca con vivos verdes"'>
-                <input type="text" value={data.kit_titular} onChange={e => u("kit_titular", e.target.value)} style={inputStyle}/>
-              </Field>
-              <Field label="Camiseta suplente" hint='Ej: "Negra"'>
-                <input type="text" value={data.kit_suplente} onChange={e => u("kit_suplente", e.target.value)} style={inputStyle}/>
-              </Field>
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16}}>
+                {/* TITULAR */}
+                <div style={{padding:12, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:6}}>
+                  <div style={{fontSize:10, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:700, marginBottom:10}}>
+                    🏠 TITULAR
+                  </div>
+                  <KitEditor
+                    prefix="kit_titular"
+                    data={data}
+                    onUpdate={u}
+                    club={club}
+                  />
+                </div>
+                {/* SUPLENTE */}
+                <div style={{padding:12, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:6}}>
+                  <div style={{fontSize:10, letterSpacing:2, color:"var(--white-dim)", fontFamily:"var(--mono)", fontWeight:700, marginBottom:10}}>
+                    ✈️ SUPLENTE
+                  </div>
+                  <KitEditor
+                    prefix="kit_suplente"
+                    data={data}
+                    onUpdate={u}
+                    club={club}
+                  />
+                </div>
+              </div>
             </Section>
 
             <div style={{display:"flex", gap:10}}>
@@ -5762,6 +5967,86 @@
               </button>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    // ─── Editor de un kit (titular o suplente) con colores + tipo + preview ────
+    function KitEditor({ prefix, data, onUpdate, club }) {
+      const c1 = data[`${prefix}_color1`] || "#FFFFFF";
+      const c2 = data[`${prefix}_color2`] || "#4FC3E8";
+      const tipo = data[`${prefix}_tipo`] || "liso";
+      const pantalon = data[`${prefix}_pantalon`] || "#111111";
+      const medias = data[`${prefix}_medias`] || "#4FC3E8";
+      const descripcion = data[prefix] || "";
+
+      const kitPreview = { color1: c1, color2: c2, tipo, pantalon, medias };
+
+      return (
+        <div>
+          {/* Descripción */}
+          <Field label="Descripción">
+            <input
+              type="text"
+              value={descripcion}
+              onChange={e => onUpdate(prefix, e.target.value)}
+              placeholder='Ej: "Blanca y Celeste"'
+              style={{...inputStyle, fontSize:12}}
+            />
+          </Field>
+
+          {/* Preview */}
+          <div style={{display:"flex", justifyContent:"center", padding:"12px 0", background:"rgba(0,0,0,0.20)", borderRadius:4, marginBottom:10}}>
+            <svg viewBox="0 0 60 90" width="70" height="105">
+              <CamisetaSVG cx={30} cy={22} kit={kitPreview} scale={1.4} accent={c2}/>
+              {/* Pantalón */}
+              <rect x={19} y={44} width={22} height={22} fill={pantalon} stroke="rgba(0,0,0,0.30)" strokeWidth={0.6} rx={2}/>
+              {/* Medias */}
+              <rect x={20} y={66} width={8} height={16} fill={medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+              <rect x={32} y={66} width={8} height={16} fill={medias} stroke="rgba(0,0,0,0.30)" strokeWidth={0.5} rx={1}/>
+            </svg>
+          </div>
+
+          {/* Tipo */}
+          <Field label="Tipo de diseño">
+            <select value={tipo} onChange={e => onUpdate(`${prefix}_tipo`, e.target.value)} style={{...inputStyle, fontSize:12}}>
+              {KIT_TIPOS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+
+          {/* Color 1 */}
+          <Field label="Color principal">
+            <div style={{display:"flex", gap:6, alignItems:"center"}}>
+              <input type="color" value={c1} onChange={e => onUpdate(`${prefix}_color1`, e.target.value)} style={{width:44, height:36, border:"none", cursor:"pointer"}}/>
+              <input type="text" value={c1} onChange={e => onUpdate(`${prefix}_color1`, e.target.value)} style={{...inputStyle, flex:1, fontFamily:"var(--mono)", fontSize:11}}/>
+            </div>
+          </Field>
+
+          {/* Color 2 (solo si el tipo no es liso) */}
+          {tipo !== "liso" && (
+            <Field label="Color secundario">
+              <div style={{display:"flex", gap:6, alignItems:"center"}}>
+                <input type="color" value={c2} onChange={e => onUpdate(`${prefix}_color2`, e.target.value)} style={{width:44, height:36, border:"none", cursor:"pointer"}}/>
+                <input type="text" value={c2} onChange={e => onUpdate(`${prefix}_color2`, e.target.value)} style={{...inputStyle, flex:1, fontFamily:"var(--mono)", fontSize:11}}/>
+              </div>
+            </Field>
+          )}
+
+          {/* Pantalón */}
+          <Field label="Pantalón">
+            <div style={{display:"flex", gap:6, alignItems:"center"}}>
+              <input type="color" value={pantalon} onChange={e => onUpdate(`${prefix}_pantalon`, e.target.value)} style={{width:44, height:36, border:"none", cursor:"pointer"}}/>
+              <input type="text" value={pantalon} onChange={e => onUpdate(`${prefix}_pantalon`, e.target.value)} style={{...inputStyle, flex:1, fontFamily:"var(--mono)", fontSize:11}}/>
+            </div>
+          </Field>
+
+          {/* Medias */}
+          <Field label="Medias">
+            <div style={{display:"flex", gap:6, alignItems:"center"}}>
+              <input type="color" value={medias} onChange={e => onUpdate(`${prefix}_medias`, e.target.value)} style={{width:44, height:36, border:"none", cursor:"pointer"}}/>
+              <input type="text" value={medias} onChange={e => onUpdate(`${prefix}_medias`, e.target.value)} style={{...inputStyle, flex:1, fontFamily:"var(--mono)", fontSize:11}}/>
+            </div>
+          </Field>
         </div>
       );
     }
@@ -9482,7 +9767,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     const CUARTO_LABELS = ["Q1", "Q2", "Q3", "Q4"];
 
     function VivoTabContent({ fecha, club, jugadores, convRows, reload }) {
-      const positions = getFormationPositions(fecha.formacion || "4-3-3");
+      // La formación del VIVO puede diferir de fecha.formacion si el DT cambia
+      // el esquema táctico durante el partido (ej. 4-3-3 → 3-4-3).
+      // Se guarda en el state (localStorage) y NO pisa la formación de CAMPO/DB.
 
       // ─── Estado persistente en localStorage ───────────────────────────────
       // Estructura: {
@@ -9494,12 +9781,19 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       //   minutosJugados: { jugador_id: segundos }
       //   cambios: [{ cuarto, minuto_cuarto, sale_id, entra_id, field_pos }]
       // }
+      // La formación del VIVO puede diferir de fecha.formacion si el DT cambia
+      // el esquema táctico durante el partido (ej. 4-3-3 → 3-4-3).
+      // Se guarda en el state (localStorage) y NO pisa la formación de CAMPO/DB.
+      const formacionInicial = fecha.formacion || "4-3-3";
+
       // Construye la formación actual leyendo de convRows (lo que está en DB = lo que armaste en CAMPO)
-      const buildFormacionFromConvRows = () => {
+      // Filtra según las posiciones válidas de la formación pasada por parámetro.
+      const buildFormacionFromConvRows = (formacionParaFiltrar) => {
+        const posValidas = getFormationPositions(formacionParaFiltrar || formacionInicial);
         const f = {};
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
-          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && positions[r.field_pos]) {
+          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && posValidas[r.field_pos]) {
             f[j.id] = r.field_pos;
           }
         }
@@ -9511,25 +9805,28 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           const raw = localStorage.getItem(vivoKey(fecha.id));
           if (raw) {
             const parsed = JSON.parse(raw);
+            // Backward compat: si no tiene formacionVivo, usar la de la fecha
+            if (!parsed.formacionVivo) parsed.formacionVivo = formacionInicial;
+            const posVivo = getFormationPositions(parsed.formacionVivo);
             const sinCambiosNiMinutos = (!parsed.cambios || parsed.cambios.length === 0)
               && !parsed.isRunning
               && (!parsed.startedAt);
             if (sinCambiosNiMinutos) {
-              parsed.formacionActual = buildFormacionFromConvRows();
+              parsed.formacionActual = buildFormacionFromConvRows(parsed.formacionVivo);
             } else if (parsed.formacionActual) {
               const limpio = {};
               for (const [jId, fp] of Object.entries(parsed.formacionActual)) {
-                if (positions[fp]) limpio[jId] = fp;
+                if (posVivo[fp]) limpio[jId] = fp;
               }
               parsed.formacionActual = limpio;
             }
-            // Backward compat: si el state guardado no tiene sanciones/minutosSuspendidos, inicializar
+            // Backward compat
             if (!parsed.sanciones) parsed.sanciones = {};
             if (!parsed.minutosSuspendidos) parsed.minutosSuspendidos = {};
             return parsed;
           }
         } catch (e) {}
-        const formacionActual = buildFormacionFromConvRows();
+        const formacionActual = buildFormacionFromConvRows(formacionInicial);
         const minutosJugados = {};
         const tiempoSinCambio = {};
         const minutosPorCuarto = {};
@@ -9548,18 +9845,20 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           segundosCuarto: 0,
           isRunning: false,
           startedAt: null,
+          formacionVivo: formacionInicial,
           formacionActual,
           minutosJugados,
           tiempoSinCambio,
           minutosPorCuarto,
           minutosSuspendidos,
           cambios: [],
-          // sanciones: { jugadorId: { color: "verde"|"amarilla"|"roja", duracion: segs|null, restante: segs, posicionOriginal: "MC", minutoInicio: "Q2 12:34" } }
           sanciones: {},
         };
       };
 
       const [state, setState] = useState(loadState);
+      // positions es dinámico según la formación activa del VIVO
+      const positions = getFormationPositions(state.formacionVivo || formacionInicial);
       const [cambiosPendientes, setCambiosPendientes] = useState([]); // [{ sale_id, entra_id }]
       const [draggingId, setDraggingId] = useState(null); // jugador que estoy arrastrando
       const [dragPos, setDragPos] = useState(null); // { x, y } posición actual del drag
@@ -9889,16 +10188,87 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             "Esto va a reemplazar la formación actual del VIVO con la que tenés guardada en la pestaña FORMACIÓN/CAMPO. ¿Continuar?"
           )) return;
         }
-        // Reconstruir formacionActual desde convRows, filtrando por posiciones válidas
+        // Volver a la formación de CAMPO (por si el VIVO tenía otra distinta)
+        const formacionCampo = fecha.formacion || "4-3-3";
+        const posCampo = getFormationPositions(formacionCampo);
         const nuevaFormacion = {};
         for (const j of jugadores) {
           const r = convRows.find(x => x.jugador_id === j.id);
-          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && positions[r.field_pos]) {
+          if (r?.status === "convocado" && r.es_titular === true && r.field_pos && posCampo[r.field_pos]) {
             nuevaFormacion[j.id] = r.field_pos;
           }
         }
-        setState(s => ({ ...s, formacionActual: nuevaFormacion }));
-        setCambiosPendientes([]); // limpiar cambios pendientes porque las posiciones cambiaron
+        setState(s => ({ ...s, formacionVivo: formacionCampo, formacionActual: nuevaFormacion }));
+        setCambiosPendientes([]);
+      };
+
+      // ─── Cambiar esquema táctico del VIVO ────────────────────────────────
+      // Permite pasar de 4-3-3 a 3-4-3, etc. sin tocar CAMPO/DB.
+      // Los jugadores se redistribuyen por proximidad geométrica.
+      // Los que no encuentren lugar (por diferencia numérica) van al banco SIN registrarse como cambio.
+      const cambiarFormacionVivo = (nuevaFormacion) => {
+        if (nuevaFormacion === state.formacionVivo) return;
+        if (!confirm(
+          `Cambiar esquema táctico de ${state.formacionVivo} a ${nuevaFormacion}?\n\n` +
+          `Los jugadores se van a reubicar automáticamente en las posiciones más cercanas. ` +
+          `Si algún jugador no encuentra lugar, va al banco. Esto NO se registra como cambio oficial.\n\n` +
+          `Esta acción NO modifica la formación de la fecha (CAMPO/DB).`
+        )) return;
+
+        const posNueva = getFormationPositions(nuevaFormacion);
+        const posViejaAll = getFormationPositions(state.formacionVivo);
+        const nuevaFA = {};
+        const ocupadas = new Set();
+        const huerfanos = [];
+
+        // 1. Primero mantener los que su posición actual sigue siendo válida
+        for (const [jId, fp] of Object.entries(state.formacionActual)) {
+          if (posNueva[fp]) {
+            nuevaFA[jId] = fp;
+            ocupadas.add(fp);
+          } else {
+            huerfanos.push({ jId, fp });
+          }
+        }
+
+        // 2. Reasignar huérfanos a la posición vacía más cercana
+        const libres = Object.keys(posNueva).filter(k => !ocupadas.has(k));
+        huerfanos.sort((a, b) => (a.fp || "zzz").localeCompare(b.fp || "zzz"));
+
+        for (const h of huerfanos) {
+          if (libres.length === 0) continue; // se queda sin lugar → banco (no lo agrego a nuevaFA)
+          const pOld = posViejaAll[h.fp] || { x: 50, y: 50 };
+          let bestKey = null, bestDist = Infinity;
+          for (const k of libres) {
+            const p = posNueva[k];
+            const d = Math.hypot(p.x - pOld.x, p.y - pOld.y);
+            if (d < bestDist) { bestDist = d; bestKey = k; }
+          }
+          if (bestKey) {
+            nuevaFA[h.jId] = bestKey;
+            const idx = libres.indexOf(bestKey);
+            if (idx >= 0) libres.splice(idx, 1);
+          }
+        }
+
+        // 3. Aplicar sin tocar minutos, cambios ni reloj (persistir valores live si el reloj corría)
+        setState(s => {
+          const live = computeLiveValues(s, Date.now());
+          return {
+            ...s,
+            formacionVivo: nuevaFormacion,
+            formacionActual: nuevaFA,
+            // Persistir live y reiniciar startedAt si el reloj estaba corriendo
+            segundosCuarto: live.segundosCuarto,
+            minutosJugados: live.minutosJugados,
+            tiempoSinCambio: live.tiempoSinCambio,
+            minutosPorCuarto: live.minutosPorCuarto,
+            sanciones: live.sanciones,
+            minutosSuspendidos: live.minutosSuspendidos,
+            startedAt: s.isRunning ? Date.now() : null,
+          };
+        });
+        setCambiosPendientes([]); // limpiar pendientes por si había alguno visualmente colgado
       };
 
       // ─── Lista de jugadores en cancha, disponibles y sancionados ─────────
@@ -10757,16 +11127,33 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           {/* ─── CANCHA SVG ─── */}
           <div style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
             <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6, flexWrap:"wrap"}}>
-              <div style={{fontSize:11, color:"var(--white-soft)", lineHeight:1.4, flex:1, minWidth:200}}>
+              <div style={{fontSize:11, color:"var(--white-soft)", lineHeight:1.4, flex:1, minWidth:180}}>
                 <span style={{fontSize:14}}>🤚</span> Arrastrá fichas: suplente↔titular = cambio · titular↔titular = swap directo
               </div>
-              <button onClick={sincronizarConCampo} title="Copiar la formación de la pestaña FORMACIÓN/CAMPO" style={{
-                padding:"5px 9px", fontSize:9, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
-                background:"transparent", border:"1px solid rgba(255,255,255,0.20)",
-                color:"var(--white-dim)", borderRadius:3, cursor:"pointer", flexShrink:0
-              }}>
-                🔄 SINCRONIZAR CON CAMPO
-              </button>
+              <div style={{display:"flex", alignItems:"center", gap:6, flexShrink:0}}>
+                {/* Selector de esquema táctico del VIVO */}
+                <label style={{fontSize:9, fontFamily:"var(--mono)", letterSpacing:1, color:"var(--white-dim)", fontWeight:700}}>ESQUEMA</label>
+                <select
+                  value={state.formacionVivo || formacionInicial}
+                  onChange={e => cambiarFormacionVivo(e.target.value)}
+                  title="Cambiar esquema táctico del partido (no toca la formación de CAMPO)"
+                  style={{
+                    padding:"5px 8px", fontSize:11, fontWeight:700, fontFamily:"var(--mono)",
+                    background:"rgba(45,157,111,0.15)", border:"1px solid var(--green)",
+                    color:"var(--green)", borderRadius:3, cursor:"pointer", outline:"none"
+                  }}>
+                  {FORMATIONS.map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                <button onClick={sincronizarConCampo} title="Volver a la formación de la pestaña FORMACIÓN/CAMPO" style={{
+                  padding:"5px 9px", fontSize:9, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+                  background:"transparent", border:"1px solid rgba(255,255,255,0.20)",
+                  color:"var(--white-dim)", borderRadius:3, cursor:"pointer"
+                }}>
+                  🔄 SINC CAMPO
+                </button>
+              </div>
             </div>
             <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{display:"block", width:"100%", height:"auto", userSelect:"none"}}>
               {/* Cancha */}
