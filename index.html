@@ -5896,7 +5896,17 @@
         theme_primary: club.theme_primary || "#4FC3E8",
         theme_secondary: club.theme_secondary || "#FFD700",
         kit_titular: club.kit_titular || "",
+        kit_titular_color1: club.kit_titular_color1 || club.theme_primary || "#FFFFFF",
+        kit_titular_color2: club.kit_titular_color2 || "#4FC3E8",
+        kit_titular_tipo: club.kit_titular_tipo || "liso",
+        kit_titular_pantalon: club.kit_titular_pantalon || "#111111",
+        kit_titular_medias: club.kit_titular_medias || club.theme_primary || "#4FC3E8",
         kit_suplente: club.kit_suplente || "",
+        kit_suplente_color1: club.kit_suplente_color1 || "#111111",
+        kit_suplente_color2: club.kit_suplente_color2 || "#FFFFFF",
+        kit_suplente_tipo: club.kit_suplente_tipo || "liso",
+        kit_suplente_pantalon: club.kit_suplente_pantalon || "#111111",
+        kit_suplente_medias: club.kit_suplente_medias || "#111111",
       });
       const [saving, setSaving] = useState(false);
       const u = (k, v) => setData(d => ({...d, [k]: v}));
