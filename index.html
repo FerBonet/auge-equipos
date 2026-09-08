@@ -335,16 +335,57 @@
         return;
       }
       try {
+        // Escala adaptativa: en listas altas, scale:2 puede superar el límite
+        // de área de canvas del celular (iOS ~16.7M px) y salir en blanco.
+        const baseW = node.scrollWidth || node.offsetWidth || 800;
+        const baseH = node.scrollHeight || node.offsetHeight || 800;
+        const MAX_AREA = 5000000; // conservador para mobile
+        let scale = 2;
+        if (baseW * baseH * scale * scale > MAX_AREA) {
+          scale = Math.max(1, Math.sqrt(MAX_AREA / (baseW * baseH)));
+        }
+
         const canvas = await window.html2canvas(node, {
           backgroundColor: "#051710",
-          scale: 2,
+          scale,
           useCORS: true,
           logging: false,
         });
+
+        const fname = filename.endsWith(".png") ? filename : filename + ".png";
+
+        // toBlob es más robusto que toDataURL en el celular
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+
+        // Si no se pudo generar el blob, último recurso: descarga por dataURL
+        if (!blob) {
+          const link = document.createElement("a");
+          link.download = fname;
+          link.href = canvas.toDataURL("image/png");
+          document.body.appendChild(link); link.click(); document.body.removeChild(link);
+          return;
+        }
+
+        const file = new File([blob], fname, { type: "image/png" });
+
+        // En celular: abrir la hoja de compartir nativa (ideal para mandar por WhatsApp).
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({ files: [file], title: fname });
+            return;
+          } catch (err) {
+            if (err && err.name === "AbortError") return; // el usuario canceló el compartir
+            // cualquier otro error del share → caemos a la descarga por blob
+          }
+        }
+
+        // Desktop (o navegador sin compartir): descarga normal por blob URL.
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.download = filename.endsWith(".png") ? filename : filename + ".png";
-        link.href = canvas.toDataURL("image/png");
+        link.download = fname;
+        link.href = url;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch (e) {
         alert("Error al exportar: " + e.message);
       }
