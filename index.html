@@ -9279,27 +9279,45 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
       useEffect(() => { load(); }, [load]);
 
-      // Guardar/actualizar el estado de un jugador
+      // Guardar/actualizar el estado de un jugador (robusto ante llamadas rápidas)
       const updateJugador = async (jugadorId, updates) => {
-        const existing = convRows.find(r => r.jugador_id === jugadorId);
-        // Optimistic update
-        const newRow = existing
-          ? { ...existing, ...updates }
-          : { jugador_id: jugadorId, fecha_id: fecha.id, status: "duda", ...updates };
-        setConvRows(prev => existing
-          ? prev.map(r => r.jugador_id === jugadorId ? newRow : r)
-          : [...prev, newRow]
-        );
-        // Persistir
-        if (existing) {
-          await sb.from("fecha_jugadores").update(updates).eq("id", existing.id);
-        } else {
-          const { data: inserted } = await sb.from("fecha_jugadores").insert({
-            fecha_id: fecha.id, jugador_id: jugadorId, status: "duda", ...updates
-          }).select().single();
-          if (inserted) {
-            setConvRows(prev => prev.map(r => r.jugador_id === jugadorId ? inserted : r));
+        // Leemos el estado MÁS RECIENTE via functional update para no usar convRows viejo
+        let rowToPersist = null;
+        setConvRows(prev => {
+          const existing = prev.find(r => r.jugador_id === jugadorId);
+          const merged = existing
+            ? { ...existing, ...updates }
+            : { jugador_id: jugadorId, fecha_id: fecha.id, status: "duda", ...updates };
+          rowToPersist = merged;
+          return existing
+            ? prev.map(r => r.jugador_id === jugadorId ? merged : r)
+            : [...prev, merged];
+        });
+        // Persistir con upsert (evita duplicados y no depende de tener el id)
+        try {
+          const payload = {
+            fecha_id: fecha.id,
+            jugador_id: jugadorId,
+            status: rowToPersist.status || "duda",
+          };
+          // Solo incluir los campos que se están actualizando + status base
+          if ("es_titular" in updates) payload.es_titular = updates.es_titular;
+          if ("field_pos" in updates)  payload.field_pos  = updates.field_pos;
+          if ("status" in updates)     payload.status     = updates.status;
+          if ("motivo" in updates)     payload.motivo     = updates.motivo;
+          // Preservar es_titular/field_pos existentes si no vienen en este update
+          if (!("es_titular" in updates) && rowToPersist.es_titular !== undefined) payload.es_titular = rowToPersist.es_titular;
+          if (!("field_pos" in updates) && rowToPersist.field_pos !== undefined)  payload.field_pos  = rowToPersist.field_pos;
+
+          const { data: saved } = await sb.from("fecha_jugadores")
+            .upsert(payload, { onConflict: "fecha_id,jugador_id" })
+            .select()
+            .single();
+          if (saved && saved.id) {
+            setConvRows(prev => prev.map(r => r.jugador_id === jugadorId ? { ...r, id: saved.id } : r));
           }
+        } catch (e) {
+          console.error("Error guardando jugador:", e);
         }
       };
 
