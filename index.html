@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-remap-huerfanos · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: fix-formacion-sync · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -9363,6 +9363,9 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         const formacionVieja = formacion;
         // 1. Cambio optimista del selector (UI ya muestra la nueva formación)
         setFormacion(val);
+        // IMPORTANTE: sincronizar también data.formacion para que el GUARDAR
+        // principal no pise este cambio con el valor viejo.
+        u("formacion", val);
         setSavingFormacion(true);
         // 2. Persistir el cambio de formación
         await sb.from("fechas").update({ formacion: val }).eq("id", fecha.id);
