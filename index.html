@@ -72,6 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
+    console.log("%c BUILD: fix-remap-huerfanos · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -2074,9 +2075,15 @@
       const [dragging, setDragging] = useState(null); // { jugadorId, x, y, originPos }
 
       // Suplentes que se acomodan en la fila de abajo
+      // Incluye también titulares con posición "huérfana" (no válida en la formación actual)
+      // para que no queden apilados en una esquina y se puedan re-arrastrar.
       const subs = convocados.filter(j => {
         const r = rowOf(j.id);
-        return r?.es_titular === false || r?.field_pos === "SUB" || (r?.field_pos == null && r?.es_titular == null);
+        if (r?.es_titular === false || r?.field_pos === "SUB") return true;
+        if (r?.field_pos == null && r?.es_titular == null) return true;
+        // Titular con field_pos que no existe en esta formación → tratarlo como banco
+        if (r?.es_titular === true && r?.field_pos && !positions[r.field_pos]) return true;
+        return false;
       });
       // Posición visual de cada suplente (en grilla)
       const subPositionOf = (idx) => {
@@ -2508,10 +2515,40 @@
       const SUB_H = 64;
 
       // Mapeo de posiciones asignadas: { fieldPos: titularObject }
+      // Defensivo: si un titular tiene una posición que NO existe en la formación actual
+      // (quedó "huérfana" de un cambio de formación anterior), lo reacomodamos al vuelo
+      // a la posición libre más cercana para que NUNCA desaparezca del campo.
       const posMap = {};
+      const _huerfanos = [];
       for (const t of titulares) {
-        if (t.field_pos && positions[t.field_pos]) {
+        if (t.field_pos && positions[t.field_pos] && !posMap[t.field_pos]) {
           posMap[t.field_pos] = t;
+        } else {
+          _huerfanos.push(t);
+        }
+      }
+      if (_huerfanos.length > 0) {
+        let _libres = Object.keys(positions).filter(k => !posMap[k]);
+        _huerfanos.sort((a, b) => (a.field_pos || "zzz").localeCompare(b.field_pos || "zzz"));
+        for (const h of _huerfanos) {
+          if (_libres.length === 0) break;
+          // Coordenadas viejas del huérfano, buscando su sigla en cualquier formación conocida
+          let oldP = { x: 50, y: 50 };
+          if (h.field_pos) {
+            for (const f of Object.values(FORMATION_POSITIONS)) {
+              if (f[h.field_pos]) { oldP = f[h.field_pos]; break; }
+            }
+          }
+          let bestKey = null, bestDist = Infinity;
+          for (const k of _libres) {
+            const p = positions[k];
+            const d = Math.hypot(p.x - oldP.x, p.y - oldP.y);
+            if (d < bestDist) { bestDist = d; bestKey = k; }
+          }
+          if (bestKey) {
+            posMap[bestKey] = h;
+            _libres = _libres.filter(k => k !== bestKey);
+          }
         }
       }
 
@@ -9379,14 +9416,17 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             }));
           }
 
-          // 4. Persistir en background (sin esperar)
-          for (const [jugadorId, updates] of Object.entries(nuevasPosiciones)) {
-            sb.from("fecha_jugadores")
-              .update(updates)
-              .eq("fecha_id", fecha.id)
-              .eq("jugador_id", jugadorId)
-              .then(() => {}, () => {});
-          }
+          // 4. Persistir con upsert y ESPERAR a que termine (evita que pise drags manuales)
+          await Promise.all(
+            Object.entries(nuevasPosiciones).map(([jugadorId, updates]) =>
+              sb.from("fecha_jugadores")
+                .upsert(
+                  { fecha_id: fecha.id, jugador_id: parseInt(jugadorId), status: "convocado", ...updates },
+                  { onConflict: "fecha_id,jugador_id" }
+                )
+                .then(() => {}, () => {})
+            )
+          );
         }
         setSavingFormacion(false);
       };
