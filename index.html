@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-formacion-owner · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: fix-mobile-baja · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -9301,6 +9301,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const [tab, setTab] = usePersistedState(`conv_admin_${fecha.id}_tab`, "convocatoria");
       const [jugadores, setJugadores] = useState([]);
       const [convRows, setConvRows] = useState([]); // fecha_jugadores existentes
+      const convRowsRef = useRef([]);
+      useEffect(() => { convRowsRef.current = convRows; }, [convRows]);
       const [loading, setLoading] = useState(true);
       const [formacion, setFormacion] = useState(fecha.formacion || "4-3-3");
       const [savingFormacion, setSavingFormacion] = useState(false);
@@ -9313,6 +9315,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           sb.from("fecha_jugadores").select("*").eq("fecha_id", fecha.id),
         ]);
         setJugadores(jRes.data || []);
+        convRowsRef.current = cRes.data || [];
         setConvRows(cRes.data || []);
         setLoading(false);
       }, [club.id, fecha.id]);
@@ -9321,40 +9324,40 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
 
       // Guardar/actualizar el estado de un jugador (robusto ante llamadas rápidas)
       const updateJugador = async (jugadorId, updates) => {
-        // Leemos el estado MÁS RECIENTE via functional update para no usar convRows viejo
-        let rowToPersist = null;
-        setConvRows(prev => {
-          const existing = prev.find(r => r.jugador_id === jugadorId);
-          const merged = existing
-            ? { ...existing, ...updates }
-            : { jugador_id: jugadorId, fecha_id: fecha.id, status: "duda", ...updates };
-          rowToPersist = merged;
-          return existing
-            ? prev.map(r => r.jugador_id === jugadorId ? merged : r)
-            : [...prev, merged];
-        });
+        // Usamos una REF que siempre tiene el estado actual — sincrónico, sin depender
+        // del timing de React (esto evita el bug en celular donde no se guardaba).
+        const existing = convRowsRef.current.find(r => r.jugador_id === jugadorId);
+        const merged = existing
+          ? { ...existing, ...updates }
+          : { jugador_id: jugadorId, fecha_id: fecha.id, status: "duda", ...updates };
+
+        // Update optimista (ref + estado) de forma inmediata
+        const nextRows = existing
+          ? convRowsRef.current.map(r => r.jugador_id === jugadorId ? merged : r)
+          : [...convRowsRef.current, merged];
+        convRowsRef.current = nextRows;
+        setConvRows(nextRows);
+
         // Persistir con upsert (evita duplicados y no depende de tener el id)
         try {
           const payload = {
             fecha_id: fecha.id,
             jugador_id: jugadorId,
-            status: rowToPersist.status || "duda",
+            status: merged.status || "duda",
           };
-          // Solo incluir los campos que se están actualizando + status base
-          if ("es_titular" in updates) payload.es_titular = updates.es_titular;
-          if ("field_pos" in updates)  payload.field_pos  = updates.field_pos;
-          if ("status" in updates)     payload.status     = updates.status;
-          if ("motivo" in updates)     payload.motivo     = updates.motivo;
-          // Preservar es_titular/field_pos existentes si no vienen en este update
-          if (!("es_titular" in updates) && rowToPersist.es_titular !== undefined) payload.es_titular = rowToPersist.es_titular;
-          if (!("field_pos" in updates) && rowToPersist.field_pos !== undefined)  payload.field_pos  = rowToPersist.field_pos;
+          if (merged.es_titular !== undefined && merged.es_titular !== null) payload.es_titular = merged.es_titular;
+          if (merged.field_pos !== undefined) payload.field_pos = merged.field_pos;
+          if (merged.motivo !== undefined) payload.motivo = merged.motivo;
 
-          const { data: saved } = await sb.from("fecha_jugadores")
+          const { data: saved, error } = await sb.from("fecha_jugadores")
             .upsert(payload, { onConflict: "fecha_id,jugador_id" })
             .select()
             .single();
+          if (error) { console.error("Error guardando jugador:", error); return; }
           if (saved && saved.id) {
-            setConvRows(prev => prev.map(r => r.jugador_id === jugadorId ? { ...r, id: saved.id } : r));
+            const withId = convRowsRef.current.map(r => r.jugador_id === jugadorId ? { ...r, id: saved.id } : r);
+            convRowsRef.current = withId;
+            setConvRows(withId);
           }
         } catch (e) {
           console.error("Error guardando jugador:", e);
