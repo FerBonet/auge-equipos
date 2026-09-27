@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-mobile-baja · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: fix-fichas-blank · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -2993,7 +2993,15 @@
           }
 
           if (!cancelled) {
-            setConvData(convThis || []);
+            // De-duplicar por jugador_id (limpia filas repetidas de bugs viejos)
+            const _dd = {};
+            for (const r of (convThis || [])) {
+              const prev = _dd[r.jugador_id];
+              if (!prev) { _dd[r.jugador_id] = r; continue; }
+              const sc = (x) => (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
+              _dd[r.jugador_id] = sc(r) >= sc(prev) ? r : prev;
+            }
+            setConvData(Object.values(_dd));
             setSeasonStats(stats);
             setLoading(false);
           }
@@ -3182,11 +3190,12 @@
 
           {tab === "campo" && (() => {
             // Construir titulares y suplentes
+            const _validoJ = (j) => j && (j.numero != null || (j.nombre || "").trim() !== "");
             const titulares = items
-              .filter(it => it.status === "convocado" && it.es_titular === true && it.field_pos && it.field_pos !== "SUB")
+              .filter(it => _validoJ(it.jugador) && it.status === "convocado" && it.es_titular === true && it.field_pos && it.field_pos !== "SUB")
               .map(it => ({ jugador_id: it.jugador.id, jugador: it.jugador, field_pos: it.field_pos }));
             const suplentes = items
-              .filter(it => it.status === "convocado" && (it.es_titular === false || it.field_pos === "SUB"))
+              .filter(it => _validoJ(it.jugador) && it.status === "convocado" && (it.es_titular === false || it.field_pos === "SUB"))
               .map(it => ({ jugador_id: it.jugador.id, jugador: it.jugador }));
 
             if (titulares.length === 0 && suplentes.length === 0) {
@@ -9315,8 +9324,18 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           sb.from("fecha_jugadores").select("*").eq("fecha_id", fecha.id),
         ]);
         setJugadores(jRes.data || []);
-        convRowsRef.current = cRes.data || [];
-        setConvRows(cRes.data || []);
+        // De-duplicar por jugador_id (limpia posibles filas repetidas de bugs viejos).
+        // Nos quedamos con la fila que tenga más datos (field_pos/es_titular definidos).
+        const _dedup = {};
+        for (const r of (cRes.data || [])) {
+          const prev = _dedup[r.jugador_id];
+          if (!prev) { _dedup[r.jugador_id] = r; continue; }
+          const score = (x) => (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
+          _dedup[r.jugador_id] = score(r) >= score(prev) ? r : prev;
+        }
+        const _clean = Object.values(_dedup);
+        convRowsRef.current = _clean;
+        setConvRows(_clean);
         setLoading(false);
       }, [club.id, fecha.id]);
 
@@ -9759,10 +9778,12 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       };
 
       // Construir arrays para HockeyField
+      // Guard: ignorar jugadores sin datos (número y nombre vacíos) para no dibujar fichas en blanco
+      const _valido = (j) => j && (j.numero != null || (j.nombre || "").trim() !== "");
       const titulares = convocados
         .filter(j => {
           const r = rowOf(j.id);
-          return r?.es_titular === true && r?.field_pos && r?.field_pos !== "SUB";
+          return _valido(j) && r?.es_titular === true && r?.field_pos && r?.field_pos !== "SUB";
         })
         .map(j => {
           const r = rowOf(j.id);
@@ -9771,7 +9792,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       const suplentes = convocados
         .filter(j => {
           const r = rowOf(j.id);
-          return r?.es_titular === false || r?.field_pos === "SUB";
+          return _valido(j) && (r?.es_titular === false || r?.field_pos === "SUB");
         })
         .map(j => ({ jugador_id: j.id, jugador: j }));
       const sinAsignar = convocados.filter(j => {
