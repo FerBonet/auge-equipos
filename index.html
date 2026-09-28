@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-fichas-blank · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: fix-vivo-minutos · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -2998,7 +2998,11 @@
             for (const r of (convThis || [])) {
               const prev = _dd[r.jugador_id];
               if (!prev) { _dd[r.jugador_id] = r; continue; }
-              const sc = (x) => (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
+              const sc = (x) =>
+                ((x.minutos_jugados || 0) > 0 ? 100 : 0) +
+                ((x.goles || 0) > 0 ? 50 : 0) +
+                (x.tarjeta_amarilla || x.tarjeta_roja || x.tarjeta_verde ? 25 : 0) +
+                (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
               _dd[r.jugador_id] = sc(r) >= sc(prev) ? r : prev;
             }
             setConvData(Object.values(_dd));
@@ -9330,7 +9334,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         for (const r of (cRes.data || [])) {
           const prev = _dedup[r.jugador_id];
           if (!prev) { _dedup[r.jugador_id] = r; continue; }
-          const score = (x) => (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
+          const score = (x) =>
+            ((x.minutos_jugados || 0) > 0 ? 100 : 0) +
+            ((x.goles || 0) > 0 ? 50 : 0) +
+            (x.tarjeta_amarilla || x.tarjeta_roja || x.tarjeta_verde ? 25 : 0) +
+            (x.field_pos ? 2 : 0) + (x.es_titular != null ? 1 : 0) + (x.id ? 0.5 : 0);
           _dedup[r.jugador_id] = score(r) >= score(prev) ? r : prev;
         }
         const _clean = Object.values(_dedup);
@@ -10773,12 +10781,13 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           }
           // 2. Update de minutos_jugados, entro_cuarto y minutos por cuarto en fecha_jugadores
           for (const jId of Object.keys(live.minutosJugados)) {
+            const jIdNum = Number(jId); // las keys de Object.keys son strings; jugador_id/entra_id son números
             const minutos = Math.round(live.minutosJugados[jId] / 60);
-            const r = convRows.find(x => x.jugador_id === jId);
+            const r = convRows.find(x => Number(x.jugador_id) === jIdNum);
             let entroCuarto = null;
             if (r?.es_titular === true) entroCuarto = 1;
             else {
-              const primerCambio = state.cambios.find(c => c.entra_id === jId);
+              const primerCambio = state.cambios.find(c => Number(c.entra_id) === jIdNum);
               if (primerCambio) entroCuarto = primerCambio.cuarto;
             }
             // Minutos por cuarto (cada uno es segundos → redondeo a minuto)
@@ -10815,7 +10824,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             await sb.from("fecha_jugadores")
               .update(updates)
               .eq("fecha_id", fecha.id)
-              .eq("jugador_id", jId);
+              .eq("jugador_id", jIdNum);
           }
           // 3. Guardar la duración real del partido en la fecha
           await sb.from("fechas")
