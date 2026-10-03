@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-vivo-formacion · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: vivo-pantalla-completa · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -10053,6 +10053,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // positions es dinámico según la formación activa del VIVO
       const positions = getFormationPositions(state.formacionVivo || formacionInicial);
       const [cambiosPendientes, setCambiosPendientes] = useState([]); // [{ sale_id, entra_id }]
+      const [pantallaCompleta, setPantallaCompleta] = useState(false);
       const [draggingId, setDraggingId] = useState(null); // jugador que estoy arrastrando
       const [dragPos, setDragPos] = useState(null); // { x, y } posición actual del drag
       const [animating, setAnimating] = useState(false); // mientras se ejecuta la animación de cambio
@@ -11209,7 +11210,19 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       }
 
       return (
-        <div>
+        <div className={pantallaCompleta ? "vivo-fs" : ""}>
+          {/* ─── Botón pantalla completa ─── */}
+          <div style={{display:"flex", justifyContent:"flex-end", marginBottom:6}}>
+            <button onClick={() => setPantallaCompleta(v => !v)} title={pantallaCompleta ? "Salir de pantalla completa" : "Pantalla completa"} style={{
+              display:"flex", alignItems:"center", gap:6, padding:"6px 12px",
+              background: pantallaCompleta ? "var(--green)" : "rgba(255,255,255,0.05)",
+              border: `1px solid ${pantallaCompleta ? "var(--green)" : "rgba(255,255,255,0.15)"}`,
+              color: pantallaCompleta ? "var(--bg)" : "var(--white-soft)",
+              borderRadius:6, cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"var(--mono)", letterSpacing:1,
+            }}>
+              {pantallaCompleta ? "✕ SALIR" : "⛶ PANTALLA COMPLETA"}
+            </button>
+          </div>
           {/* ─── Estilos de animación del trazo ─── */}
           <style>{`
             @keyframes dashFlow {
@@ -11224,10 +11237,33 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               transition: transform 0.7s cubic-bezier(0.4, 1.6, 0.6, 1);
               -webkit-transition: transform 0.7s cubic-bezier(0.4, 1.6, 0.6, 1);
             }
+            /* ─── MODO PANTALLA COMPLETA VIVO ─── */
+            .vivo-fs {
+              position: fixed; inset: 0; z-index: 9999;
+              background: var(--bg);
+              display: flex; flex-direction: column;
+              gap: 6px;
+              padding: calc(6px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) calc(6px + env(safe-area-inset-left, 0px));
+              overflow: hidden;
+            }
+            .vivo-fs > div { margin-bottom: 0 !important; }
+            /* La cancha ocupa todo el alto sobrante y escala manteniendo proporción */
+            .vivo-fs .vivo-cancha-wrap { flex: 1 1 0; min-height: 0; padding: 6px !important; display: flex; flex-direction: column; }
+            .vivo-fs .vivo-cancha-wrap > svg { flex: 1 1 0; min-height: 0; width: 100% !important; height: 100% !important; }
+            /* Reloj y controles compactos en pantalla completa */
+            .vivo-fs .vivo-reloj { padding: 8px !important; }
+            /* En horizontal (tablet apaisado): cancha a la izquierda, resumen a la derecha */
+            @media (orientation: landscape) {
+              .vivo-fs { flex-direction: row; flex-wrap: wrap; align-content: stretch; }
+              .vivo-fs .vivo-reloj { order: 1; flex: 0 0 100%; }
+              .vivo-fs .vivo-cancha-wrap { order: 3; flex: 1 1 60%; }
+              .vivo-fs .vivo-lateral { order: 4; flex: 1 1 32%; min-width: 220px; overflow-y: auto; }
+              .vivo-fs .vivo-pendientes { order: 2; flex: 0 0 100%; }
+            }
           `}</style>
 
           {/* ─── RELOJ ARRIBA ─── */}
-          <div style={{
+          <div className="vivo-reloj" style={{
             padding:14, background:"rgba(0,0,0,0.3)",
             border:`2px solid ${tiempoFinalCuarto ? "var(--red)" : (state.isRunning ? "var(--green)" : "var(--white-dim)")}`,
             borderRadius:8, marginBottom:14,
@@ -11297,6 +11333,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           </div>
 
           {/* ─── Cambios pendientes (cartel + botón) ─── */}
+          {/* vivo-pendientes */}
           {cambiosPendientes.length > 0 && (
             <div style={{
               padding:12, background:"rgba(255,140,0,0.10)", border:"1px solid var(--orange)", borderRadius:6, marginBottom:12,
@@ -11319,7 +11356,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           )}
 
           {/* ─── CANCHA SVG ─── */}
-          <div style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
+          <div className="vivo-cancha-wrap" style={{padding:10, background:"rgba(0,0,0,0.25)", borderRadius:6, marginBottom:12}}>
             <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6, flexWrap:"wrap"}}>
               <div style={{fontSize:11, color:"var(--white-soft)", lineHeight:1.4, flex:1, minWidth:180}}>
                 <span style={{fontSize:14}}>🤚</span> Arrastrá fichas: suplente↔titular = cambio · titular↔titular = swap directo
@@ -11443,6 +11480,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           </div>
 
           {/* ─── Resumen + Finalizar ─── */}
+          <div className="vivo-lateral">
           <div style={{padding:12, background:"rgba(255,255,255,0.02)", borderRadius:6, marginBottom:10}}>
             <div style={{display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, fontSize:11}}>
               <div style={{textAlign:"center"}}>
@@ -11473,6 +11511,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
               {finalizando ? "Guardando..." : "🏁 FINALIZAR PARTIDO"}
             </button>
           </div>
+          </div>{/* /vivo-lateral */}
         </div>
       );
     }
