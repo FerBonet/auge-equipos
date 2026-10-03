@@ -72,7 +72,7 @@
     </div>
   </div>
   <script type="text/babel">
-    console.log("%c BUILD: fix-vivo-minutos · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
+    console.log("%c BUILD: fix-vivo-formacion · " + new Date().toISOString().slice(0,10), "color:#2D9D6F;font-weight:bold");
     const { useState, useEffect, useCallback, useRef } = React;
 
     const SUPABASE_URL = "https://ojzsvefvbsrrdyeswqlg.supabase.co";
@@ -9558,6 +9558,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           ) : tab === "vivo" ? (
             <VivoTabContent
               fecha={fecha}
+              formacionActualFecha={formacion}
               club={club}
               jugadores={jugadoresActivos}
               convRows={convRows}
@@ -9957,7 +9958,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
     }
     const CUARTO_LABELS = ["Q1", "Q2", "Q3", "Q4"];
 
-    function VivoTabContent({ fecha, club, jugadores, convRows, reload }) {
+    function VivoTabContent({ fecha, formacionActualFecha, club, jugadores, convRows, reload }) {
       // La formación del VIVO puede diferir de fecha.formacion si el DT cambia
       // el esquema táctico durante el partido (ej. 4-3-3 → 3-4-3).
       // Se guarda en el state (localStorage) y NO pisa la formación de CAMPO/DB.
@@ -9975,7 +9976,8 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
       // La formación del VIVO puede diferir de fecha.formacion si el DT cambia
       // el esquema táctico durante el partido (ej. 4-3-3 → 3-4-3).
       // Se guarda en el state (localStorage) y NO pisa la formación de CAMPO/DB.
-      const formacionInicial = fecha.formacion || "4-3-3";
+      // Usar la formación ACTUAL (estado vivo del editor), no la del objeto fecha que puede estar viejo
+      const formacionInicial = formacionActualFecha || fecha.formacion || "4-3-3";
 
       // Construye la formación actual leyendo de convRows (lo que está en DB = lo que armaste en CAMPO)
       // Filtra según las posiciones válidas de la formación pasada por parámetro.
@@ -10380,7 +10382,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
           )) return;
         }
         // Volver a la formación de CAMPO (por si el VIVO tenía otra distinta)
-        const formacionCampo = fecha.formacion || "4-3-3";
+        const formacionCampo = formacionActualFecha || fecha.formacion || "4-3-3";
         const posCampo = getFormationPositions(formacionCampo);
         const nuevaFormacion = {};
         for (const j of jugadores) {
@@ -10427,7 +10429,7 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
         huerfanos.sort((a, b) => (a.fp || "zzz").localeCompare(b.fp || "zzz"));
 
         for (const h of huerfanos) {
-          if (libres.length === 0) continue; // se queda sin lugar → banco (no lo agrego a nuevaFA)
+          if (libres.length === 0) break; // ya no quedan posiciones (mismo nº de slots, no debería pasar)
           const pOld = posViejaAll[h.fp] || { x: 50, y: 50 };
           let bestKey = null, bestDist = Infinity;
           for (const k of libres) {
@@ -10435,11 +10437,11 @@ F3 - 26/04/2026 - vs Ducilo - L - 11:30`}</pre>
             const d = Math.hypot(p.x - pOld.x, p.y - pOld.y);
             if (d < bestDist) { bestDist = d; bestKey = k; }
           }
-          if (bestKey) {
-            nuevaFA[h.jId] = bestKey;
-            const idx = libres.indexOf(bestKey);
-            if (idx >= 0) libres.splice(idx, 1);
-          }
+          // Fallback: si por alguna razón no encontró por proximidad, usar la primera libre
+          if (!bestKey) bestKey = libres[0];
+          nuevaFA[h.jId] = bestKey;
+          const idx = libres.indexOf(bestKey);
+          if (idx >= 0) libres.splice(idx, 1);
         }
 
         // 3. Aplicar sin tocar minutos, cambios ni reloj (persistir valores live si el reloj corría)
